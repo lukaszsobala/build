@@ -35,10 +35,14 @@ declare -g SERIALCON="ttyS0"
 declare -g SRC_EXTLINUX="yes"
 declare -g SRC_CMDLINE="earlycon=sbi console=tty1 console=ttyS0,115200 loglevel=7 rootwait rw"
 
-# Boot configuration
-declare -g BOOTCONFIG="milkv_duos_riscv64_sd_defconfig"
+# Boot configuration - use vendor bootloader (fip.bin)
+# Armbian won't build U-Boot, instead the extension writes pre-built fip.bin to image
+declare -g BOOTCONFIG="none"
 declare -g BOOTFS_TYPE="ext4"
 declare -g BOOTSIZE="256"
+
+# Enable Sophgo bootloader blob extension
+declare -g ENABLE_EXTENSIONS="sophgo-fip-blobs"
 
 # Due to limited RAM (512MB), minimize packages
 declare -g PACKAGE_LIST_BOARD=""
