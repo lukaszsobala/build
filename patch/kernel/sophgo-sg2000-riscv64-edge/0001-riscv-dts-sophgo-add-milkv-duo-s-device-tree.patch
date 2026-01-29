@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Armbian <community@armbian.com>
-Date: Thu, 01 Jan 2025 00:00:00 +0000
+From: Armbian Build Framework <build@armbian.com>
+Date: Wed, 29 Jan 2026 00:00:00 +0000
 Subject: [PATCH] riscv: dts: sophgo: add milkv duo-s device tree
 
 Add device tree support for Milkv Duo S in RISC-V mode.
@@ -9,39 +9,23 @@ in either ARM64 or RISC-V mode via hardware switch.
 
 This DTS is for RISC-V (C906) mode operation.
 
-Based on upstream work at:
-https://lore.kernel.org/all/20250101000000.00000-1-example@kernel.org/
-
-Signed-off-by: Armbian <community@armbian.com>
+Signed-off-by: Armbian Build Framework <build@armbian.com>
 ---
- arch/riscv/boot/dts/sophgo/Makefile              |   1 +
- arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts | 148 +++++++++++++
- 2 files changed, 149 insertions(+)
+ arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts | 146 ++++++++++++++++++++++
+ 1 file changed, 146 insertions(+)
  create mode 100644 arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
-
-diff --git a/arch/riscv/boot/dts/sophgo/Makefile b/arch/riscv/boot/dts/sophgo/Makefile
-index 111111111111..222222222222 100644
---- a/arch/riscv/boot/dts/sophgo/Makefile
-+++ b/arch/riscv/boot/dts/sophgo/Makefile
-@@ -4,6 +4,7 @@ dtb-$(CONFIG_SOC_SOPHGO) += cv1800b-milkv-duo.dtb
- dtb-$(CONFIG_SOC_SOPHGO) += cv1812h-huashan-pi.dtb
- dtb-$(CONFIG_SOC_SOPHGO) += sg2000-milkv-duo256m.dtb
- dtb-$(CONFIG_SOC_SOPHGO) += sg2002-milkv-duo256m.dtb
-+dtb-$(CONFIG_SOC_SOPHGO) += sg2000-milkv-duo-s.dtb
-
- obj-$(CONFIG_BUILTIN_DTB) += $(addsuffix .o, $(dtb-y))
 
 diff --git a/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts b/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
 new file mode 100644
 index 000000000000..333333333333
 --- /dev/null
 +++ b/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,146 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Device Tree for Milkv Duo S (RISC-V mode)
 + *
-+ * Copyright (C) 2025 Armbian Community
++ * Copyright (C) 2026 Armbian Build Framework
 + */
 +
 +/dts-v1/;
@@ -183,5 +167,6 @@ index 000000000000..333333333333
 +&spi2 {
 +	status = "okay";
 +};
---
-2.45.0
+-- 
+Armbian
+

@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Armbian Build Framework <build@armbian.com>
+Date: Wed, 29 Jan 2026 00:00:00 +0000
+Subject: [PATCH] riscv: dts: sophgo: Add sg2000-milkv-duo-s to Makefile
+
+Add the sg2000-milkv-duo-s.dtb to the build.
+
+Signed-off-by: Armbian Build Framework <build@armbian.com>
+---
+ arch/riscv/boot/dts/sophgo/Makefile | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/riscv/boot/dts/sophgo/Makefile b/arch/riscv/boot/dts/sophgo/Makefile
+index 111111111111..222222222222 100644
+--- a/arch/riscv/boot/dts/sophgo/Makefile
++++ b/arch/riscv/boot/dts/sophgo/Makefile
+@@ -3,6 +3,7 @@
+ dtb-$(CONFIG_SOC_SOPHGO) += cv1800b-milkv-duo.dtb
+ dtb-$(CONFIG_SOC_SOPHGO) += cv1812h-huashan-pi.dtb
+ dtb-$(CONFIG_SOC_SOPHGO) += sg2000-milkv-duo256m.dtb
++dtb-$(CONFIG_SOC_SOPHGO) += sg2000-milkv-duo-s.dtb
+ dtb-$(CONFIG_SOC_SOPHGO) += sg2002-milkv-duo256m.dtb
+ 
+ obj-$(CONFIG_BUILTIN_DTB) += $(addsuffix .o, $(dtb-y))
+-- 
+Armbian
+
