@@ -7,12 +7,15 @@ Add device tree support for Milkv Duo S in RISC-V mode.
 The Milkv Duo S uses Sophgo SG2000 SoC which can boot
 in either ARM64 or RISC-V mode via hardware switch.
 
+The SG2000 is similar to SG2002/CV1812H, so we base this
+on the cv1812h.dtsi include chain.
+
 This DTS is for RISC-V (C906) mode operation.
 
 Signed-off-by: Armbian Build Framework <build@armbian.com>
 ---
- arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts | 146 ++++++++++++++++++++++
- 1 file changed, 146 insertions(+)
+ arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts | 99 +++++++++++++++++++++++
+ 1 file changed, 99 insertions(+)
  create mode 100644 arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
 
 diff --git a/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts b/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
@@ -20,152 +23,106 @@ new file mode 100644
 index 000000000000..333333333333
 --- /dev/null
 +++ b/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,99 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Device Tree for Milkv Duo S (RISC-V mode)
++ *
++ * The Milkv Duo S uses Sophgo SG2000 SoC which is similar to CV1812H.
++ * It can boot in either ARM64 or RISC-V mode via hardware switch.
++ * This DTS is for RISC-V (T-Head C906) mode operation.
 + *
 + * Copyright (C) 2026 Armbian Build Framework
 + */
 +
 +/dts-v1/;
 +
-+#include "sg2000.dtsi"
++#include "cv1812h.dtsi"
 +
 +/ {
-+	model = "Milkv Duo S (RISC-V)";
-+	compatible = "milkv,duo-s", "sophgo,sg2000";
++	model = "Milkv Duo S";
++	compatible = "milkv,duo-s", "sophgo,sg2000", "sophgo,cv1812h";
 +
 +	aliases {
 +		serial0 = &uart0;
-+		ethernet0 = &emac0;
 +		mmc0 = &sdhci0;
 +	};
 +
 +	chosen {
 +		stdout-path = "serial0:115200n8";
-+		bootargs = "console=ttyS0,115200 earlycon=sbi root=/dev/mmcblk0p2 rootwait rw";
 +	};
 +
++	/* Override memory size - Duo S has 512MB but some reserved */
 +	memory@80000000 {
 +		device_type = "memory";
-+		/* 512 MB total, but some reserved for 8051 subsystem */
-+		reg = <0x00 0x80000000 0x00 0x1c000000>;
++		reg = <0x80000000 0x1c000000>;
 +	};
 +
 +	reserved-memory {
-+		#address-cells = <2>;
-+		#size-cells = <2>;
++		#address-cells = <1>;
++		#size-cells = <1>;
 +		ranges;
 +
 +		/* Reserved for 8051 subsystem */
-+		c906l_memory: memory@9c000000 {
-+			reg = <0x00 0x9c000000 0x00 0x04000000>;
++		coprocessor_rsvd: memory@9c000000 {
++			reg = <0x9c000000 0x04000000>;
 +			no-map;
 +		};
 +	};
 +
-+	/* Blue LED on board */
 +	leds {
 +		compatible = "gpio-leds";
 +
-+		led-blue {
-+			label = "duo-s:blue:status";
-+			gpios = <&gpio2 5 GPIO_ACTIVE_HIGH>;
++		led-0 {
++			gpios = <&portc 24 GPIO_ACTIVE_HIGH>;
 +			linux,default-trigger = "heartbeat";
 +		};
 +	};
 +
-+	/* WiFi module power control */
-+	wifi_pwrseq: wifi-pwrseq {
-+		compatible = "mmc-pwrseq-simple";
-+		reset-gpios = <&gpio2 9 GPIO_ACTIVE_LOW>;
-+		post-power-on-delay-ms = <200>;
-+	};
-+
-+	/* Regulator for SD card */
 +	vcc_sd: regulator-vcc-sd {
 +		compatible = "regulator-fixed";
 +		regulator-name = "vcc_sd";
 +		regulator-min-microvolt = <3300000>;
 +		regulator-max-microvolt = <3300000>;
 +		regulator-boot-on;
-+		regulator-always-on;
-+	};
-+
-+	/* 3.3V rail */
-+	vcc_3v3: regulator-vcc-3v3 {
-+		compatible = "regulator-fixed";
-+		regulator-name = "vcc_3v3";
-+		regulator-min-microvolt = <3300000>;
-+		regulator-max-microvolt = <3300000>;
-+		regulator-boot-on;
-+		regulator-always-on;
 +	};
 +};
 +
-+/* Primary UART - serial console */
-+&uart0 {
-+	status = "okay";
++&osc {
++	clock-frequency = <25000000>;
 +};
 +
-+/* UART4 - RISC-V mode brings out UART4 on GPIO header */
-+&uart4 {
-+	status = "okay";
++&pinctrl {
++	compatible = "sophgo,sg2000-pinctrl", "sophgo,cv1812h-pinctrl";
 +};
 +
-+/* SD card slot */
++&clk {
++	compatible = "sophgo,sg2000-clk", "sophgo,cv1812h-clk";
++};
++
++&plic {
++	compatible = "sophgo,sg2000-plic", "sophgo,cv1812h-plic", "thead,c900-plic";
++};
++
++&clint {
++	compatible = "sophgo,sg2000-clint", "sophgo,cv1812h-clint", "thead,c900-clint";
++};
++
 +&sdhci0 {
++	compatible = "sophgo,sg2000-dwcmshc", "sophgo,cv1812h-dwcmshc";
 +	status = "okay";
 +	bus-width = <4>;
 +	vmmc-supply = <&vcc_sd>;
 +	no-1-8-v;
 +	disable-wp;
-+	cap-sd-highspeed;
-+	max-frequency = <50000000>;
 +};
 +
-+/* WiFi SDIO (optional module) */
-+&sdhci1 {
-+	status = "disabled";
-+	bus-width = <4>;
-+	mmc-pwrseq = <&wifi_pwrseq>;
-+	non-removable;
-+	cap-sdio-irq;
-+	keep-power-in-suspend;
++&uart0 {
++	status = "okay";
 +};
 +
-+/* 10/100 Ethernet */
 +&emac0 {
-+	status = "okay";
-+	phy-mode = "rmii";
-+	phy-handle = <&phy0>;
-+
-+	mdio {
-+		#address-cells = <1>;
-+		#size-cells = <0>;
-+
-+		phy0: ethernet-phy@0 {
-+			reg = <0>;
-+		};
-+	};
-+};
-+
-+/* USB 2.0 */
-+&usb {
-+	status = "okay";
-+	dr_mode = "otg";
-+};
-+
-+/* I2C0 - GPIO header */
-+&i2c0 {
-+	status = "okay";
-+	clock-frequency = <400000>;
-+};
-+
-+/* SPI2 - GPIO header */
-+&spi2 {
-+	status = "okay";
++	status = "disabled";
 +};
 -- 
 Armbian

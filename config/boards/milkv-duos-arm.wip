@@ -42,6 +42,10 @@ declare -g BOOTSIZE="256"
 # Enable Sophgo bootloader blob extension
 declare -g ENABLE_EXTENSIONS="sophgo-fip-blobs"
 
+# Enable Sophgo AIC8800 WiFi/BT support (onboard WiFi 6 / BT 5)
+# The Duo S has an AIC8800D80 chip connected via SDIO
+enable_extension "sophgo-aic8800"
+
 # Due to limited RAM (512MB), minimize packages
 declare -g PACKAGE_LIST_BOARD=""
 declare -g PACKAGE_LIST_BOARD_REMOVE="chromium snapd cloud-init"
