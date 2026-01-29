@@ -19,8 +19,8 @@ declare -g BOARD_VENDOR="milkv"
 declare -g BOARDFAMILY="sophgo-sg2000-arm64"
 declare -g BOARD_MAINTAINER=""
 
-# Only edge branch available (mainline kernel support starts at 6.17)
-declare -g KERNEL_TARGET="edge"
+# Use current branch (mainline kernel 6.18 with Sophgo support)
+declare -g KERNEL_TARGET="current"
 
 # Device tree - using Sophgo naming convention for ARM64
 # The DT is pending mainline: https://lore.kernel.org/sophgo/20251011014811.28521-1-josh.milas@gmail.com/
