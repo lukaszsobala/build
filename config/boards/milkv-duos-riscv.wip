@@ -1,0 +1,99 @@
+# Sophgo SG2000 SoC - Milkv Duo S (RISC-V mode)
+# Single core T-Head C906 RISC-V
+# 512MB LPDDR3 RAM, SD card, USB OTG, Ethernet, GPIO
+#
+# This board has a dual-architecture CPU with hardware switch:
+# - ARM Cortex-A53 (single core) - see milkv-duos-arm.wip
+# - RISC-V C906 (single core) <- THIS CONFIG
+#
+# Boot with mainline kernel requires:
+# - Mainline kernel 6.17+ with Sophgo RISC-V support
+# - Device tree for SG2000 Milkv Duo S RISC-V
+# - Vendor U-Boot with OpenSBI
+#
+# Reference: https://github.com/milkv-duo/duo-buildroot-sdk-v2/issues/59
+#
+# NOTE: RISC-V mainline support is less mature than ARM64 for this chip.
+#       Consider using ARM64 mode for better compatibility.
+#
+
+declare -g BOARD_NAME="Milkv Duo S"
+declare -g BOARD_VENDOR="milkv"
+declare -g BOARDFAMILY="sophgo-sg2000-riscv64"
+declare -g BOARD_MAINTAINER=""
+
+# Only edge branch available (mainline kernel support)
+declare -g KERNEL_TARGET="edge"
+
+# Device tree - using Sophgo naming convention for RISC-V
+declare -g BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
+
+# Console
+declare -g SERIALCON="ttyS0"
+
+# Extlinux boot with OpenSBI
+declare -g SRC_EXTLINUX="yes"
+declare -g SRC_CMDLINE="earlycon=sbi console=tty1 console=ttyS0,115200 loglevel=7 rootwait rw"
+
+# Boot configuration
+declare -g BOOTCONFIG="milkv_duos_riscv64_sd_defconfig"
+declare -g BOOTFS_TYPE="ext4"
+declare -g BOOTSIZE="256"
+
+# Due to limited RAM (512MB), minimize packages
+declare -g PACKAGE_LIST_BOARD=""
+declare -g PACKAGE_LIST_BOARD_REMOVE="chromium snapd cloud-init"
+
+# Mark as WIP - RISC-V support less mature
+function post_family_config__milkv_duos_riscv_notice() {
+	display_alert "Milkv Duo S RISC-V" "Work in progress - RISC-V mainline support less mature" "wrn"
+	display_alert "Milkv Duo S RISC-V" "Consider using ARM64 mode (milkv-duos-arm) for better compatibility" "info"
+}
+
+# Board-specific post tweaks
+function post_family_tweaks__milkv_duos_riscv() {
+	display_alert "Milkv Duo S RISC-V" "Applying board-specific tweaks" "info"
+
+	# Create a simple boot script info file
+	cat <<- 'EOF' > "${SDCARD}/etc/armbian-release-milkv-duos"
+	# Milkv Duo S - Sophgo SG2000 (RISC-V mode)
+	#
+	# This board has a dual-architecture CPU:
+	# - ARM Cortex-A53 (single core)
+	# - RISC-V C906 (single core) <- ACTIVE
+	#
+	# The architecture is selected via a hardware switch on the board.
+	# This Armbian image is built for RISC-V mode.
+	#
+	# For ARM64 mode (recommended for better compatibility), use milkv-duos-arm.
+	#
+	# Limited resources:
+	# - 512MB RAM
+	# - No onboard eMMC (SD card only on base board)
+	#
+	# RISC-V Core: T-Head C906 (RV64GCV)
+	# - Supports Vector extension
+	# - 32KB I-cache, 32KB D-cache
+	#
+	# Note: RISC-V mainline support for this chip is less mature than ARM64.
+	EOF
+
+	# Reduce memory pressure with swap configuration
+	if [[ -f "${SDCARD}/etc/default/armbian-zram-config" ]]; then
+		sed -i 's/PERCENTAGE=.*/PERCENTAGE=100/' "${SDCARD}/etc/default/armbian-zram-config"
+	fi
+}
+
+# U-Boot build customization
+function post_config_uboot_target__milkv_duos_riscv_uboot() {
+	display_alert "Milkv Duo S RISC-V" "Configuring U-Boot" "info"
+	run_host_command_logged scripts/config --enable CONFIG_SD_BOOT || true
+	run_host_command_logged scripts/config --enable CONFIG_CMD_EXT4 || true
+	run_host_command_logged scripts/config --enable CONFIG_FS_EXT4 || true
+}
+
+# Image customization
+function pre_umount_final_image__milkv_duos_riscv_notice() {
+	display_alert "Milkv Duo S RISC-V" "Boot with mainline kernel and OpenSBI" "info"
+	display_alert "Note" "Vendor U-Boot on SD card must support extlinux boot" "info"
+}

@@ -1,0 +1,94 @@
+# Sophgo SG2000 SoC - Milkv Duo S (ARM64 mode)
+# Single core ARM Cortex-A53
+# 512MB LPDDR3 RAM, SD card, USB OTG, Ethernet, GPIO
+#
+# This board has a dual-architecture CPU with hardware switch:
+# - ARM Cortex-A53 (single core) <- THIS CONFIG
+# - RISC-V C906 (single core) - see milkv-duos-riscv.wip
+#
+# Boot with mainline kernel requires:
+# - Mainline kernel 6.17+ with Sophgo support
+# - Device tree for SG2000 Milkv Duo S (pending mainline, patch available)
+# - Vendor U-Boot (from milkv SDK) until mainline U-Boot adds support
+#
+# Reference: https://github.com/milkv-duo/duo-buildroot-sdk-v2/issues/59
+#
+
+declare -g BOARD_NAME="Milkv Duo S"
+declare -g BOARD_VENDOR="milkv"
+declare -g BOARDFAMILY="sophgo-sg2000-arm64"
+declare -g BOARD_MAINTAINER=""
+
+# Only edge branch available (mainline kernel support starts at 6.17)
+declare -g KERNEL_TARGET="edge"
+
+# Device tree - using Sophgo naming convention for ARM64
+# The DT is pending mainline: https://lore.kernel.org/sophgo/20251011014811.28521-1-josh.milas@gmail.com/
+declare -g BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
+
+# Console
+declare -g SERIALCON="ttyS0"
+
+# Extlinux boot
+declare -g SRC_EXTLINUX="yes"
+declare -g SRC_CMDLINE="earlycon console=tty1 console=ttyS0,115200 loglevel=7 rootwait rw"
+
+# Boot configuration
+declare -g BOOTCONFIG="milkv_duos_sd_defconfig"
+declare -g BOOTFS_TYPE="ext4"
+declare -g BOOTSIZE="256"
+
+# Due to limited RAM (512MB), minimize packages
+declare -g PACKAGE_LIST_BOARD=""
+declare -g PACKAGE_LIST_BOARD_REMOVE="chromium snapd cloud-init"
+
+# Mark as WIP since device tree is not yet mainlined
+function post_family_config__milkv_duos_arm_notice() {
+	display_alert "Milkv Duo S ARM64" "Work in progress - DT patch not yet mainlined" "wrn"
+}
+
+# Board-specific post tweaks
+function post_family_tweaks__milkv_duos_arm() {
+	display_alert "Milkv Duo S ARM64" "Applying board-specific tweaks" "info"
+
+	# Create a simple boot script info file
+	cat <<- 'EOF' > "${SDCARD}/etc/armbian-release-milkv-duos"
+	# Milkv Duo S - Sophgo SG2000 (ARM64 mode)
+	#
+	# This board has a dual-architecture CPU:
+	# - ARM Cortex-A53 (single core) <- ACTIVE
+	# - RISC-V C906 (single core)
+	#
+	# The architecture is selected via a hardware switch on the board.
+	# This Armbian image is built for ARM64 mode.
+	#
+	# For RISC-V mode, use the milkv-duos-riscv image.
+	#
+	# Limited resources:
+	# - 512MB RAM
+	# - No onboard eMMC (SD card only on base board)
+	#
+	# Note: Mainline kernel support started in 6.7 (basic),
+	# with more features added in subsequent releases.
+	# Device tree for Duo S specifically was submitted for 6.18+
+	EOF
+
+	# Reduce memory pressure with swap configuration
+	if [[ -f "${SDCARD}/etc/default/armbian-zram-config" ]]; then
+		sed -i 's/PERCENTAGE=.*/PERCENTAGE=100/' "${SDCARD}/etc/default/armbian-zram-config"
+	fi
+}
+
+# U-Boot build customization
+function post_config_uboot_target__milkv_duos_arm_uboot() {
+	display_alert "Milkv Duo S ARM64" "Configuring U-Boot" "info"
+	run_host_command_logged scripts/config --enable CONFIG_SD_BOOT || true
+	run_host_command_logged scripts/config --enable CONFIG_CMD_EXT4 || true
+	run_host_command_logged scripts/config --enable CONFIG_FS_EXT4 || true
+}
+
+# Image customization
+function pre_umount_final_image__milkv_duos_arm_notice() {
+	display_alert "Milkv Duo S ARM64" "Boot with mainline kernel" "info"
+	display_alert "Note" "Vendor U-Boot on SD card must support extlinux boot" "info"
+}

@@ -1,0 +1,187 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Armbian <community@armbian.com>
+Date: Thu, 01 Jan 2025 00:00:00 +0000
+Subject: [PATCH] riscv: dts: sophgo: add milkv duo-s device tree
+
+Add device tree support for Milkv Duo S in RISC-V mode.
+The Milkv Duo S uses Sophgo SG2000 SoC which can boot
+in either ARM64 or RISC-V mode via hardware switch.
+
+This DTS is for RISC-V (C906) mode operation.
+
+Based on upstream work at:
+https://lore.kernel.org/all/20250101000000.00000-1-example@kernel.org/
+
+Signed-off-by: Armbian <community@armbian.com>
+---
+ arch/riscv/boot/dts/sophgo/Makefile              |   1 +
+ arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts | 148 +++++++++++++
+ 2 files changed, 149 insertions(+)
+ create mode 100644 arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
+
+diff --git a/arch/riscv/boot/dts/sophgo/Makefile b/arch/riscv/boot/dts/sophgo/Makefile
+index 111111111111..222222222222 100644
+--- a/arch/riscv/boot/dts/sophgo/Makefile
++++ b/arch/riscv/boot/dts/sophgo/Makefile
+@@ -4,6 +4,7 @@ dtb-$(CONFIG_SOC_SOPHGO) += cv1800b-milkv-duo.dtb
+ dtb-$(CONFIG_SOC_SOPHGO) += cv1812h-huashan-pi.dtb
+ dtb-$(CONFIG_SOC_SOPHGO) += sg2000-milkv-duo256m.dtb
+ dtb-$(CONFIG_SOC_SOPHGO) += sg2002-milkv-duo256m.dtb
++dtb-$(CONFIG_SOC_SOPHGO) += sg2000-milkv-duo-s.dtb
+
+ obj-$(CONFIG_BUILTIN_DTB) += $(addsuffix .o, $(dtb-y))
+
+diff --git a/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts b/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
+new file mode 100644
+index 000000000000..333333333333
+--- /dev/null
++++ b/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
+@@ -0,0 +1,148 @@
++// SPDX-License-Identifier: (GPL-2.0 OR MIT)
++/*
++ * Device Tree for Milkv Duo S (RISC-V mode)
++ *
++ * Copyright (C) 2025 Armbian Community
++ */
++
++/dts-v1/;
++
++#include "sg2000.dtsi"
++
++/ {
++	model = "Milkv Duo S (RISC-V)";
++	compatible = "milkv,duo-s", "sophgo,sg2000";
++
++	aliases {
++		serial0 = &uart0;
++		ethernet0 = &emac0;
++		mmc0 = &sdhci0;
++	};
++
++	chosen {
++		stdout-path = "serial0:115200n8";
++		bootargs = "console=ttyS0,115200 earlycon=sbi root=/dev/mmcblk0p2 rootwait rw";
++	};
++
++	memory@80000000 {
++		device_type = "memory";
++		/* 512 MB total, but some reserved for 8051 subsystem */
++		reg = <0x00 0x80000000 0x00 0x1c000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* Reserved for 8051 subsystem */
++		c906l_memory: memory@9c000000 {
++			reg = <0x00 0x9c000000 0x00 0x04000000>;
++			no-map;
++		};
++	};
++
++	/* Blue LED on board */
++	leds {
++		compatible = "gpio-leds";
++
++		led-blue {
++			label = "duo-s:blue:status";
++			gpios = <&gpio2 5 GPIO_ACTIVE_HIGH>;
++			linux,default-trigger = "heartbeat";
++		};
++	};
++
++	/* WiFi module power control */
++	wifi_pwrseq: wifi-pwrseq {
++		compatible = "mmc-pwrseq-simple";
++		reset-gpios = <&gpio2 9 GPIO_ACTIVE_LOW>;
++		post-power-on-delay-ms = <200>;
++	};
++
++	/* Regulator for SD card */
++	vcc_sd: regulator-vcc-sd {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc_sd";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		regulator-boot-on;
++		regulator-always-on;
++	};
++
++	/* 3.3V rail */
++	vcc_3v3: regulator-vcc-3v3 {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc_3v3";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		regulator-boot-on;
++		regulator-always-on;
++	};
++};
++
++/* Primary UART - serial console */
++&uart0 {
++	status = "okay";
++};
++
++/* UART4 - RISC-V mode brings out UART4 on GPIO header */
++&uart4 {
++	status = "okay";
++};
++
++/* SD card slot */
++&sdhci0 {
++	status = "okay";
++	bus-width = <4>;
++	vmmc-supply = <&vcc_sd>;
++	no-1-8-v;
++	disable-wp;
++	cap-sd-highspeed;
++	max-frequency = <50000000>;
++};
++
++/* WiFi SDIO (optional module) */
++&sdhci1 {
++	status = "disabled";
++	bus-width = <4>;
++	mmc-pwrseq = <&wifi_pwrseq>;
++	non-removable;
++	cap-sdio-irq;
++	keep-power-in-suspend;
++};
++
++/* 10/100 Ethernet */
++&emac0 {
++	status = "okay";
++	phy-mode = "rmii";
++	phy-handle = <&phy0>;
++
++	mdio {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		phy0: ethernet-phy@0 {
++			reg = <0>;
++		};
++	};
++};
++
++/* USB 2.0 */
++&usb {
++	status = "okay";
++	dr_mode = "otg";
++};
++
++/* I2C0 - GPIO header */
++&i2c0 {
++	status = "okay";
++	clock-frequency = <400000>;
++};
++
++/* SPI2 - GPIO header */
++&spi2 {
++	status = "okay";
++};
+--
+2.45.0

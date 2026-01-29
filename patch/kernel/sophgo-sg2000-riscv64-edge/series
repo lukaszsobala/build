@@ -1,0 +1,5 @@
+# Patch series for Sophgo SG2000/SG2002 RISC-V kernel support
+# These patches add device tree and driver support not yet in mainline
+
+# Device tree for Milkv Duo S (RISC-V mode)
+0001-riscv-dts-sophgo-add-milkv-duo-s-device-tree.patch

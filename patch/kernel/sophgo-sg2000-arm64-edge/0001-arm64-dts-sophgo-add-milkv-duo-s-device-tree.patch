@@ -1,0 +1,176 @@
+From: Armbian Build Framework <build@armbian.com>
+Subject: [PATCH] riscv: dts: sophgo: Add Milkv Duo S device tree (ARM64 mode)
+Date: Wed, 29 Jan 2026 00:00:00 +0000
+
+This patch adds device tree support for the Milkv Duo S board in ARM64 mode.
+The Milkv Duo S uses the Sophgo SG2000 SoC which has a dual-architecture
+design: single-core ARM Cortex-A53 or single-core RISC-V C906, selectable
+via a hardware switch.
+
+This device tree is for the ARM64 mode.
+
+Based on: https://lore.kernel.org/sophgo/20251011014811.28521-1-josh.milas@gmail.com/
+
+Note: This patch should be removed once the upstream DT is merged into mainline.
+
+Signed-off-by: Armbian Build Framework <build@armbian.com>
+---
+ arch/arm64/boot/dts/sophgo/Makefile           |   1 +
+ arch/arm64/boot/dts/sophgo/sg2000-milkv-duo-s.dts | 150 ++++++++++++++++++
+ 2 files changed, 151 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/sophgo/sg2000-milkv-duo-s.dts
+
+--- a/arch/arm64/boot/dts/sophgo/Makefile
++++ b/arch/arm64/boot/dts/sophgo/Makefile
+@@ -1,3 +1,4 @@
+ # SPDX-License-Identifier: GPL-2.0
+ dtb-$(CONFIG_ARCH_SOPHGO) += sg2042-milkv-pioneer.dtb
++dtb-$(CONFIG_ARCH_SOPHGO) += sg2000-milkv-duo-s.dtb
+--- /dev/null
++++ b/arch/arm64/boot/dts/sophgo/sg2000-milkv-duo-s.dts
+@@ -0,0 +1,150 @@
++// SPDX-License-Identifier: (GPL-2.0 OR MIT)
++/*
++ * Device tree for Milkv Duo S (ARM64 mode)
++ * Sophgo SG2000 SoC - Single core Cortex-A53
++ *
++ * Copyright (C) 2024-2026 Josh Milas <josh.milas@gmail.com>
++ * Copyright (C) 2026 Armbian Build Framework
++ *
++ * Based on upstream submission:
++ * https://lore.kernel.org/sophgo/20251011014811.28521-1-josh.milas@gmail.com/
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++
++/ {
++	compatible = "milkv,duo-s", "sophgo,sg2000";
++	model = "Milkv Duo S";
++
++	#address-cells = <2>;
++	#size-cells = <2>;
++
++	aliases {
++		serial0 = &uart0;
++		ethernet0 = &gmac0;
++	};
++
++	chosen {
++		stdout-path = "serial0:115200n8";
++	};
++
++	memory@80000000 {
++		device_type = "memory";
++		reg = <0x0 0x80000000 0x0 0x20000000>; /* 512MB */
++	};
++
++	cpus {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		cpu0: cpu@0 {
++			compatible = "arm,cortex-a53";
++			device_type = "cpu";
++			reg = <0>;
++			enable-method = "psci";
++			clock-frequency = <1000000000>; /* 1GHz */
++		};
++	};
++
++	psci {
++		compatible = "arm,psci-1.0";
++		method = "smc";
++	};
++
++	timer {
++		compatible = "arm,armv8-timer";
++		interrupts = <1 13 4>,
++			     <1 14 4>,
++			     <1 11 4>,
++			     <1 10 4>;
++	};
++
++	soc {
++		compatible = "simple-bus";
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		clk: clock-controller@3002000 {
++			compatible = "sophgo,cv1800-clk";
++			reg = <0x0 0x03002000 0x0 0x1000>;
++			#clock-cells = <1>;
++		};
++
++		pinctrl: pinctrl@3001000 {
++			compatible = "sophgo,sg2000-pinctrl";
++			reg = <0x0 0x03001000 0x0 0x1000>;
++		};
++
++		uart0: serial@4140000 {
++			compatible = "snps,dw-apb-uart";
++			reg = <0x0 0x04140000 0x0 0x100>;
++			interrupts = <0 44 4>;
++			clock-frequency = <25000000>;
++			reg-shift = <2>;
++			reg-io-width = <4>;
++			status = "okay";
++		};
++
++		gmac0: ethernet@4070000 {
++			compatible = "sophgo,sg2000-dwmac", "snps,dwmac-5.10a";
++			reg = <0x0 0x04070000 0x0 0x10000>;
++			interrupts = <0 31 4>;
++			interrupt-names = "macirq";
++			clocks = <&clk 0>, <&clk 1>;
++			clock-names = "stmmaceth", "pclk";
++			snps,multicast-filter-bins = <64>;
++			snps,perfect-filter-entries = <128>;
++			snps,axi-config = <&stmmac_axi_config>;
++			status = "okay";
++
++			stmmac_axi_config: stmmac-axi-config {
++				snps,wr_osr_lmt = <15>;
++				snps,rd_osr_lmt = <15>;
++				snps,blen = <256 128 64 32 0 0 0>;
++			};
++		};
++
++		mmc0: mmc@4310000 {
++			compatible = "sophgo,sg2000-sdhci", "cvi,cv1800-sdhci";
++			reg = <0x0 0x04310000 0x0 0x10000>;
++			interrupts = <0 36 4>;
++			clocks = <&clk 0>;
++			clock-names = "core";
++			bus-width = <4>;
++			cap-sd-highspeed;
++			cap-mmc-highspeed;
++			status = "okay";
++		};
++
++		usb: usb@4340000 {
++			compatible = "sophgo,sg2000-dwc2", "snps,dwc2";
++			reg = <0x0 0x04340000 0x0 0x10000>;
++			interrupts = <0 30 4>;
++			phys = <&usbphy>;
++			phy-names = "usb2-phy";
++			dr_mode = "otg";
++			status = "okay";
++		};
++
++		usbphy: usbphy {
++			compatible = "usb-nop-xceiv";
++			#phy-cells = <0>;
++		};
++
++		rtc: rtc@5026000 {
++			compatible = "sophgo,cv1800-rtc";
++			reg = <0x0 0x05026000 0x0 0x1000>;
++			interrupts = <0 17 4>;
++			status = "okay";
++		};
++	};
++};
