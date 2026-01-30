@@ -23,7 +23,8 @@ declare -g BOARDFAMILY="sophgo-sg2000-riscv64"
 declare -g BOARD_MAINTAINER=""
 
 # Use current branch (mainline kernel 6.18 with Sophgo support)
-declare -g KERNEL_TARGET="current"
+# Edge kernel (6.19-rc) also available for testing
+declare -g KERNEL_TARGET="current,edge"
 
 # Device tree - using Sophgo naming convention for RISC-V
 declare -g BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
