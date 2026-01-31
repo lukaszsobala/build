@@ -55,8 +55,8 @@ function sophgo_find_fip_blob() {
 	return 1
 }
 
-# Hook to write fip.bin to the image before unmounting
-# This is called for BOOTCONFIG="none" boards where write_uboot_platform is not invoked
+# Hook to copy fip.bin to the boot partition before unmounting
+# The Sophgo bootrom reads fip.bin from the FAT boot partition as a file
 function pre_umount_final_image__write_sophgo_fip_blob() {
 	[[ "${LINUXFAMILY}" != sophgo-sg2000* ]] && return 0
 
@@ -86,11 +86,13 @@ function pre_umount_final_image__write_sophgo_fip_blob() {
 		return 0
 	fi
 
-	display_alert "Writing Sophgo fip.bin" "${fip_blob} -> ${LOOP}" "info"
+	# Copy fip.bin to the boot partition as a file
+	# The Sophgo bootrom reads fip.bin from the FAT filesystem
+	local boot_mount="${MOUNT}/boot"
 
-	# Write fip.bin starting at sector 1 (512 bytes offset, skip MBR at sector 0)
-	# This matches the Sophgo/Milkv SDK layout
-	dd if="${fip_blob}" of="${LOOP}" bs=512 seek=1 conv=notrunc,fsync status=none
+	display_alert "Copying Sophgo fip.bin" "${fip_blob} -> ${boot_mount}/fip.bin" "info"
 
-	display_alert "Sophgo bootloader" "Written successfully to ${LOOP}" "info"
+	run_host_command_logged cp -v "${fip_blob}" "${boot_mount}/fip.bin"
+
+	display_alert "Sophgo bootloader" "Copied to boot partition successfully" "info"
 }

@@ -37,8 +37,8 @@ declare -g SRC_CMDLINE="earlycon console=tty1 console=ttyS0,115200 loglevel=7 ro
 # Boot configuration - use vendor bootloader (fip.bin)
 # Armbian won't build U-Boot, instead the extension writes pre-built fip.bin to image
 declare -g BOOTCONFIG="none"
-declare -g BOOTFS_TYPE="ext4"
-declare -g BOOTSIZE="256"
+declare -g BOOTFS_TYPE="fat" # Sophgo bootrom reads fip.bin from FAT partition
+declare -g BOOTSIZE="128" # Match official SDK image size
 
 # Enable Sophgo bootloader blob extension
 declare -g ENABLE_EXTENSIONS="sophgo-fip-blobs"
