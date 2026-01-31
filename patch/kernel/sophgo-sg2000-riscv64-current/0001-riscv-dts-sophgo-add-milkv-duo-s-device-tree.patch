@@ -14,8 +14,8 @@ This DTS is for RISC-V (C906) mode operation.
 
 Signed-off-by: Armbian Build Framework <build@armbian.com>
 ---
- arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts | 99 +++++++++++++++++++++++
- 1 file changed, 99 insertions(+)
+ arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts | 96 +++++++++++++++++++++++
+ 1 file changed, 96 insertions(+)
  create mode 100644 arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
 
 diff --git a/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts b/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
@@ -23,7 +23,7 @@ new file mode 100644
 index 000000000000..333333333333
 --- /dev/null
 +++ b/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,96 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Device Tree for Milkv Duo S (RISC-V mode)
@@ -119,10 +119,6 @@ index 000000000000..333333333333
 +
 +&uart0 {
 +	status = "okay";
-+};
-+
-+&emac0 {
-+	status = "disabled";
 +};
 -- 
 Armbian
