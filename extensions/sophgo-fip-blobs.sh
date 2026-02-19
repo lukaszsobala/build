@@ -96,3 +96,35 @@ function pre_umount_final_image__write_sophgo_fip_blob() {
 
 	display_alert "Sophgo bootloader" "Copied to boot partition successfully" "info"
 }
+
+# Hook to create boot.sd script for Sophgo boards
+# This is needed because SRC_EXTLINUX=yes prevents BOOTSCRIPT from being processed
+# The boot.sd script sets up memory addresses and calls sysboot to parse extlinux.conf
+function pre_umount_final_image__create_sophgo_boot_script() {
+	[[ "${LINUXFAMILY}" != sophgo-sg2000* ]] && return 0
+
+	local boot_mount="${MOUNT}/boot"
+	local boot_script_src="${SRC}/config/bootscripts/boot-sophgo-sg2000.cmd"
+
+	if [[ ! -f "${boot_script_src}" ]]; then
+		display_alert "WARNING" "Sophgo boot script not found: ${boot_script_src}" "wrn"
+		return 0
+	fi
+
+	display_alert "Creating boot.sd" "Compiling boot script for Sophgo" "info"
+
+	# Copy boot.cmd to boot partition
+	run_host_command_logged cp -v "${boot_script_src}" "${boot_mount}/boot.cmd"
+
+	# Compile boot.cmd to boot.sd using mkimage
+	# The vendor U-Boot looks for boot.sd specifically
+	if [[ "${ARCH}" == "riscv64" ]]; then
+		run_host_command_logged mkimage -A riscv -T script -C none -n "Boot script" \
+			-d "${boot_mount}/boot.cmd" "${boot_mount}/boot.sd"
+	else
+		run_host_command_logged mkimage -A arm64 -T script -C none -n "Boot script" \
+			-d "${boot_mount}/boot.cmd" "${boot_mount}/boot.sd"
+	fi
+
+	display_alert "Sophgo boot script" "boot.sd created successfully" "info"
+}

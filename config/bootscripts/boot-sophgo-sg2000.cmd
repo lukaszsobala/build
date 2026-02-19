@@ -9,10 +9,12 @@
 
 # Memory layout for SG2000 (512MB RAM at 0x80000000)
 # kernel_addr_r: Kernel load address
-# fdt_addr_r: Device tree load address (must not overlap with kernel)
+# fdt_addr_r: Device tree load address (must not overlap with decompressed kernel!)
+#             RISC-V kernel decompresses to ~20MB, ARM64 is ~17MB uncompressed
+#             Using 0x82000000 (30MB offset) to be safe for both architectures
 # ramdisk_addr_r: Initrd load address
 setenv kernel_addr_r 0x80200000
-setenv fdt_addr_r 0x81400000
+setenv fdt_addr_r 0x82000000
 setenv ramdisk_addr_r 0x86000000
 
 # Boot partition is FAT on mmc 0:1
