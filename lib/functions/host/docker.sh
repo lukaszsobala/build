@@ -155,6 +155,29 @@ function docker_cli_prepare() {
 	fi
 
 	#############################################################################################################
+	# Optionally clean up old Docker images to free disk space. Off by
+	# default — set DOCKER_PRUNE=yes to opt in.
+	#
+	# The cleanup enumerates `docker images` and calls `docker rmi` on
+	# "old" ones. On hosts where several build invocations share one
+	# dockerd (the usual setup when multiple self-hosted GH Actions
+	# runners live on the same machine) two concurrent invocations
+	# race: runner A's cleanup can rmi an image runner B just
+	# committed between `Successfully built <sha>` and the daemon
+	# writing the imagedb digest file, surfacing as:
+	#   failed to get digest sha256:…: open …/imagedb/content/sha256/…:
+	#   no such file or directory
+	# which aborts runner B's build. Default-off keeps shared-daemon
+	# setups safe; single-host users who want automatic reclaim set
+	# DOCKER_PRUNE=yes and either accept the race risk or run builds
+	# serially.
+	if [[ "${DOCKER_PRUNE:-no}" == "yes" ]]; then
+		docker_cleanup_old_images
+	else
+		display_alert "Skipping Docker image cleanup" "set DOCKER_PRUNE=yes to enable" "debug"
+	fi
+
+	#############################################################################################################
 	# Detect some docker info; use cached.
 	get_docker_info_once
 
@@ -377,7 +400,6 @@ function docker_cli_prepare_launch() {
 	declare -g -a DOCKER_ARGS=(
 		"--rm" # side effect - named volumes are considered not attached to anything and are removed on "docker volume prune", since container was removed.
 
-		"--privileged"         # Yep. Armbian needs /dev/loop access, device access, etc. Don't even bother trying without it.
 		"--cap-add=SYS_ADMIN"  # add only required capabilities instead
 		"--cap-add=MKNOD"      # (though MKNOD should be already present)
 		"--cap-add=SYS_PTRACE" # CAP_SYS_PTRACE is required for systemd-detect-virt in some cases @TODO: rpardini: so lets eliminate it @TODO: rpardini maybe it's dead already?
@@ -420,12 +442,34 @@ function docker_cli_prepare_launch() {
 		"--env" "GITHUB_WORKSPACE=${GITHUB_WORKSPACE}"
 
 		# Pass proxy args
- 		"--env" "http_proxy=${http_proxy:-${HTTP_PROXY}}"
- 		"--env" "https_proxy=${https_proxy:-${HTTPS_PROXY}}"
- 		"--env" "HTTP_PROXY=${HTTP_PROXY}"
-		"--env" "HTTPS_PROXY=${HTTPS_PROXY}"
-		"--env" "APT_PROXY_ADDR=${APT_PROXY_ADDR}"
+		"--env" "http_proxy=${http_proxy:-${HTTP_PROXY:-}}"
+		"--env" "https_proxy=${https_proxy:-${HTTPS_PROXY:-}}"
+		"--env" "HTTP_PROXY=${HTTP_PROXY:-${http_proxy:-}}"
+		"--env" "HTTPS_PROXY=${HTTPS_PROXY:-${https_proxy:-}}"
+		"--env" "ftp_proxy=${ftp_proxy:-${FTP_PROXY:-}}"
+		"--env" "FTP_PROXY=${FTP_PROXY:-${ftp_proxy:-}}"
+		"--env" "no_proxy=${no_proxy:-${NO_PROXY:-}}"
+		"--env" "NO_PROXY=${NO_PROXY:-${no_proxy:-}}"
+		"--env" "APT_PROXY_ADDR=${APT_PROXY_ADDR:-}"
 	)
+
+	# Pass in host DNS server so container can resolve hostnames on proxy
+	declare _dns_resolv_file="/etc/resolv.conf"
+	[[ -f "/run/systemd/resolve/resolv.conf" ]] && _dns_resolv_file="/run/systemd/resolve/resolv.conf"
+	while IFS= read -r _dns_server; do
+		[[ "${_dns_server}" =~ ^127\. || "${_dns_server}" == "::1" || "${_dns_server}" =~ ^fe80: ]] && continue
+		DOCKER_ARGS+=("--dns" "${_dns_server}")
+	done < <(awk '/^nameserver/ {print $2}' "${_dns_resolv_file}" 2>/dev/null)
+
+	# DOCKER_PRIVILEGED=no switches to a narrow capability set.
+	if [[ "${DOCKER_PRIVILEGED:-yes}" == "yes" ]]; then
+		DOCKER_ARGS+=("--privileged")
+	else
+		DOCKER_ARGS+=(
+			"--device=/dev/loop-control:/dev/loop-control"
+			"--security-opt=seccomp=unconfined"
+		)
+	fi
 
 	# This env var is used super early (in entrypoint.sh), so set it as an env to current value.
 	if [[ "${DOCKER_ARMBIAN_ENABLE_CALL_TRACING:-no}" == "yes" ]]; then
@@ -568,8 +612,23 @@ function docker_cli_prepare_launch() {
 		display_alert "Not running in a terminal" "not passing through stdin to Docker" "debug"
 	fi
 
-	# if DOCKER_EXTRA_ARGS is an array and has more than zero elements, add its contents to the DOCKER_ARGS array
-	if [[ "${DOCKER_EXTRA_ARGS[*]+isset}" == "isset" && "${#DOCKER_EXTRA_ARGS[@]}" -gt 0 ]]; then
+	# Preserve any pre-existing DOCKER_EXTRA_ARGS (e.g., from user environment) and let extensions append
+	declare -g -a DOCKER_EXTRA_ARGS=("${DOCKER_EXTRA_ARGS[@]+"${DOCKER_EXTRA_ARGS[@]}"}")
+
+	# Hook for extensions to add Docker arguments before launch
+	call_extension_method "host_pre_docker_launch" <<- 'HOST_PRE_DOCKER_LAUNCH'
+		*run on host just before Docker container is launched*
+		Extensions can add Docker arguments by appending to DOCKER_EXTRA_ARGS array.
+		Each array element should be a complete argument (e.g., "--env", "MY_VAR=value" as separate elements).
+		Example: DOCKER_EXTRA_ARGS+=("--env" "MY_VAR=value" "--mount" "type=bind,src=/a,dst=/b")
+		Available variables:
+		  - DOCKER_ARGS[@]: current Docker arguments (do not modify directly)
+		  - DOCKER_EXTRA_ARGS[@]: array to append extra arguments for docker run
+		  - DOCKER_ARMBIAN_TARGET_PATH: path inside container (/armbian)
+	HOST_PRE_DOCKER_LAUNCH
+
+	# Add DOCKER_EXTRA_ARGS to DOCKER_ARGS if any were added by extensions
+	if [[ "${#DOCKER_EXTRA_ARGS[@]}" -gt 0 ]]; then
 		display_alert "Adding extra Docker arguments" "${DOCKER_EXTRA_ARGS[*]}" "debug"
 		DOCKER_ARGS+=("${DOCKER_EXTRA_ARGS[@]}")
 	fi
@@ -639,4 +698,244 @@ function docker_purge_deprecated_volumes() {
 			display_alert "Deprecated Docker volume not found" "${volume_id} OK" "info"
 		fi
 	done
+}
+
+# Clean old/unused Docker images to free disk space
+# Removes dangling images and keeps only the 2 most recent armbian images per tag
+function docker_cleanup_old_images() {
+	display_alert "Cleaning old Docker images" "removing dangling and keeping only 2 most recent per tag" "info"
+
+	# Remove dangling images (layers with no tags)
+	display_alert "Pruning dangling images" "docker image prune -f" "debug"
+	docker image prune -f > /dev/null 2>&1 || true
+
+	# For each armbian image tag, keep only the 2 most recent
+	declare image_tags=()
+	while IFS= read -r line; do
+		image_tags+=("$line")
+	done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep "docker-armbian-build" | sort -u)
+
+	for image_tag in "${image_tags[@]}"; do
+		# Get all image IDs for this tag, sorted by creation date (newest first)
+		declare -a image_ids=()
+		while IFS= read -r line; do
+			image_ids+=("$line")
+		done < <(docker images --format '{{.ID}} {{.CreatedAt}}' "${image_tag}" | sort -r -k2,2 -k3,3 -k4,4 -k5,5 | awk '{print $1}')
+
+		# Remove images beyond the first 2 (keep newest 2)
+		if [[ ${#image_ids[@]} -gt 2 ]]; then
+			for ((i=2; i<${#image_ids[@]}; i++)); do
+				display_alert "Removing old image" "${image_tag}:${image_ids[$i]}" "debug"
+				docker rmi "${image_ids[$i]}" > /dev/null 2>&1 || true
+			done
+		fi
+	done
+
+	display_alert "Docker cleanup complete" "dangling images removed, old armbian images pruned" "info"
+}
+
+# Pull a Docker image and update the marker file to track when it was last pulled
+# Usage: docker_pull_with_marker <image_name>
+function docker_pull_with_marker() {
+	declare image_name="$1"
+	declare docker_marker_dir="${SRC}"/cache/docker
+
+	# If cache dir exists, but we can't write to cache dir...
+	if [[ -d "${SRC}"/cache ]] && [[ ! -w "${SRC}"/cache ]]; then
+		docker_marker_dir="${SRC}"/.tmp/docker
+	fi
+
+	run_host_command_logged mkdir -p "${docker_marker_dir}"
+
+	display_alert "Pulling Docker image" "${image_name}" "info"
+
+	if docker pull "${image_name}"; then
+		# Update marker file after successful pull
+		declare local_image_sha
+		local_image_sha="$(docker images --no-trunc --quiet "${image_name}")"
+		if [[ -n "${local_image_sha}" ]]; then
+			echo "${image_name}|${local_image_sha}|$(date +%s)" >> "${docker_marker_dir}"/last-pull
+			display_alert "Updated pull marker" "${image_name}" "debug"
+		fi
+		return 0
+	else
+		display_alert "Failed to pull" "${image_name}" "wrn"
+		return 1
+	fi
+}
+
+# Setup or update system cronjob to automatically pull Docker images
+# This ensures images are always fresh before builds start
+# Controlled by ARMBIAN_DOCKER_AUTO_PULL environment variable (must be explicitly set to "yes" to enable)
+function docker_setup_auto_pull_cronjob() {
+	if [[ ! -d /etc/cron.d ]]; then
+		exit_with_error "Docker auto-pull cronjob" "cron not available; /etc/cron.d does not exist on this system"
+	fi
+	declare cron_file="/etc/cron.d/armbian-docker-pull"
+	declare wrapper_script="/usr/local/bin/armbian-docker-pull"
+	declare hash_file="/var/lib/armbian/docker-pull.hash"
+
+	# Determine which images to pull based on common base images
+	declare -a images_to_pull=(
+		"ghcr.io/armbian/docker-armbian-build:armbian-ubuntu-noble-latest"
+		"ghcr.io/armbian/docker-armbian-build:armbian-debian-trixie-latest"
+	)
+
+	# Generate the wrapper script content (self-contained)
+	declare wrapper_content
+	wrapper_content=$(cat <<- 'EOT'
+	#!/usr/bin/env bash
+	# Auto-generated by Armbian build framework
+	# Pulls Docker images and updates markers to prevent unnecessary re-pulls
+	# DO NOT EDIT MANUALLY - this file is regenerated by the build system
+
+	set -e
+	set -o pipefail
+
+	SRC="__SRC_PLACEHOLDER__"
+	MARKER_DIR="${SRC}/cache/docker"
+
+	# Fallback to .tmp if cache is not writable
+	if [[ -d "${SRC}/cache" ]] && [[ ! -w "${SRC}/cache" ]]; then
+		MARKER_DIR="${SRC}/.tmp/docker"
+	fi
+
+	mkdir -p "${MARKER_DIR}"
+
+	# Simple logging function
+	log() {
+		echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | logger -t armbian-docker-pull
+	}
+
+	# Pull a Docker image and update the marker file
+	pull_with_marker() {
+		local image_name="$1"
+
+		log "Pulling Docker image: ${image_name}"
+
+		if docker pull "${image_name}" 2>&1 | logger -t armbian-docker-pull; then
+			# Update marker file after successful pull
+			local local_image_sha
+			local_image_sha="$(docker images --no-trunc --quiet "${image_name}")"
+			if [[ -n "${local_image_sha}" ]]; then
+				echo "${image_name}|${local_image_sha}|$(date +%s)" >> "${MARKER_DIR}/last-pull"
+				log "Updated pull marker for: ${image_name}"
+			fi
+			return 0
+		else
+			log "Failed to pull: ${image_name}"
+			return 1
+		fi
+	}
+
+	# Pull each image
+	__IMAGE_COMMANDS__
+	EOT
+	)
+
+	# Replace placeholders with actual values
+	wrapper_content="${wrapper_content//__SRC_PLACEHOLDER__/${SRC}}"
+	declare image_commands=""
+	for image in "${images_to_pull[@]}"; do
+		image_commands+="pull_with_marker \"${image}\""$'\n'
+	done
+	wrapper_content="${wrapper_content//__IMAGE_COMMANDS__/${image_commands}}"
+
+	# Calculate hash of the wrapper content
+	declare current_wrapper_hash
+	current_wrapper_hash="$(echo "${wrapper_content}" | sha256sum | cut -d' ' -f1)"
+
+	# Generate the cron file content
+	declare cron_content
+	cron_content=$(cat <<- 'EOT'
+	# Armbian Docker image auto-pull
+	# Pulls Docker images every 12 hours to keep them fresh
+	# This prevents the '12 hours since last pull, pulling again' delay during builds
+	# DO NOT EDIT MANUALLY - this file is regenerated by the build system
+	EOT
+	)
+	declare cron_user="${ARMBIAN_DOCKER_PULL_USER:-${SUDO_USER:-$(whoami)}}"
+	cron_content="${cron_content}"$'\n'"0 */12 * * * ${cron_user} ${wrapper_script} 2>&1 | logger -t armbian-docker-pull"
+
+	# Calculate combined hash (wrapper + cron content)
+	declare current_hash="${current_wrapper_hash}"
+	cron_hash="$(echo "${cron_content}" | sha256sum | cut -d' ' -f1)"
+	current_hash="$(echo "${current_hash}${cron_hash}" | sha256sum | cut -d' ' -f1)"
+
+	# Check if we need to update
+	declare needs_update="yes"
+	if [[ -f "${hash_file}" ]]; then
+		declare stored_hash
+		stored_hash="$(cat "${hash_file}")"
+		if [[ "${stored_hash}" == "${current_hash}" ]]; then
+			needs_update="no"
+		else
+			display_alert "Docker auto-pull" "configuration changed, updating" "info"
+		fi
+	fi
+
+	if [[ "${needs_update}" == "yes" ]]; then
+		# Create/update wrapper script
+		display_alert "Creating/updating Docker auto-pull wrapper script" "${wrapper_script}" "info"
+		if ! echo "${wrapper_content}" | sudo tee "${wrapper_script}" > /dev/null 2>&1; then
+			display_alert "Docker auto-pull" "failed to create wrapper script (sudo required)" "warn"
+			return 0
+		fi
+		sudo chmod +x "${wrapper_script}" || true
+
+		# Create/update cron file
+		display_alert "Creating/updating Docker auto-pull cronjob" "${cron_file}" "info"
+		echo "${cron_content}" | sudo tee "${cron_file}" > /dev/null
+		sudo chmod 600 "${cron_file}"
+
+		# Store hash for next time
+		sudo mkdir -p "$(dirname "${hash_file}")"
+		echo "${current_hash}" | sudo tee "${hash_file}" > /dev/null
+		sudo chmod 644 "${hash_file}"
+
+		# Verify cron service is running
+		if systemctl is-active --quiet cron || systemctl is-active --quiet crond; then
+			display_alert "Docker auto-pull cronjob" "installed/updated successfully - images will be pulled every 12 hours" "info"
+		else
+			display_alert "Docker auto-pull cronjob" "installed/updated but cron service not active" "warn"
+		fi
+	fi
+}
+
+# Check if auto-pull cronjob is installed, and install if not or outdated
+# Controlled by ARMBIAN_DOCKER_AUTO_PULL environment variable (must be explicitly set to "yes" to enable)
+function docker_ensure_auto_pull_cronjob() {
+	declare wrapper_script="/usr/local/bin/armbian-docker-pull"
+	declare cron_file="/etc/cron.d/armbian-docker-pull"
+	declare hash_file="/var/lib/armbian/docker-pull.hash"
+
+	# Only proceed if ARMBIAN_DOCKER_AUTO_PULL is explicitly set to "yes"
+	if [[ "${ARMBIAN_DOCKER_AUTO_PULL}" != "yes" ]]; then
+		# Remove cronjob, wrapper script, and hash file if they exist
+		if [[ -f "${cron_file}" ]] || [[ -f "${wrapper_script}" ]] || [[ -f "${hash_file}" ]]; then
+			display_alert "Docker auto-pull" "removing cronjob and wrapper script" "info"
+
+			if [[ -f "${cron_file}" ]]; then
+				run_host_command_logged sudo rm -f "${cron_file}"
+				display_alert "Removed" "cron file: ${cron_file}" "debug"
+			fi
+
+			if [[ -f "${wrapper_script}" ]]; then
+				run_host_command_logged sudo rm -f "${wrapper_script}"
+				display_alert "Removed" "wrapper script: ${wrapper_script}" "debug"
+			fi
+
+			if [[ -f "${hash_file}" ]]; then
+				run_host_command_logged sudo rm -f "${hash_file}"
+				display_alert "Removed" "hash file: ${hash_file}" "debug"
+			fi
+
+			display_alert "Docker auto-pull" "cronjob and wrapper script removed successfully" "info"
+		fi
+		return 0
+	fi
+
+	# ARMBIAN_DOCKER_AUTO_PULL is explicitly set to "yes", ensure cronjob is installed
+	# Always call docker_setup_auto_pull_cronjob - it will check hashes and only update if needed
+	docker_setup_auto_pull_cronjob
 }
