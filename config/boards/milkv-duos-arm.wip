@@ -13,7 +13,7 @@
 # https://milkv.io/duo-s
 BOARD_NAME="Milk-V Duo S"
 BOARDFAMILY="sophgo-sg200x-arm64"
-BOARD_MAINTAINER=""
+BOARD_MAINTAINER="lukaszsobala"
 KERNEL_TARGET="edge,bleedingedge"
 BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
 SERIALCON="ttyS0"

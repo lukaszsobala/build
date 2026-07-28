@@ -18,24 +18,48 @@
 #
 # The chain, distilled from duo-buildroot-sdk-v2's build/scripts/fip_v2.mk:
 #
-#   u-boot (sophgo/u-boot-2021.10)               ->  u-boot.bin
+#   u-boot  (sophgo/u-boot-2021.10)               ->  u-boot.bin
 #     cat u-boot.bin > u-boot-raw.bin
-#   fsbl   (sophgo/fsbl, LOADER_2ND_PATH=above)  ->  fip.bin
+#   opensbi (sophgo/opensbi, RISC-V only)         ->  fw_dynamic.bin
+#   fsbl    (sophgo/fsbl, LOADER_2ND_PATH=above,
+#            MONITOR_PATH=bl31.bin or fw_dynamic) ->  fip.bin
 #
-# On ARM that is the whole story: OpenSBI is only built for RISC-V, and the EL3
-# monitor is a 24KiB prebuilt bl31.bin shipped inside sophgo/fsbl itself
-# (plat/cv181x/prebuilt/). FreeRTOS for the companion C906L core is skipped -
-# Linux loads it later through remoteproc anyway, and building it would pull in
-# a 131MiB repo plus cmake.
+# fip.bin has a monitor slot and a "loader 2nd" slot. The loader is always
+# U-Boot. The monitor is a 24KiB prebuilt bl31.bin shipped inside sophgo/fsbl
+# (plat/cv181x/prebuilt/) on ARM, and OpenSBI on RISC-V, which is why only the
+# RISC-V family builds a third component.
+#
+# The FSBL also decides which core runs Linux, through TOC_HEADER_NAME
+# (0xC906B001 for RISC-V, 0xAA640001 for aarch64). Nothing on the board selects
+# it; writing a different image is the switch.
+#
+# Both architectures skip FreeRTOS for the companion C906L core - Linux loads it
+# later through remoteproc anyway, and building it would pull in a 131MiB repo
+# plus cmake.
 #
 # The vendor U-Boot does not build standalone: its board description lives in
 # the SDK, not in the U-Boot tree. Those files are vendored under
 # packages/sophgo-sg200x/u-boot/ and copied in below. See that directory's
 # README.md.
 #
+# None of the three build with a modern toolchain untouched. binutils 2.38 split
+# zicsr and zifencei out of the base ISA, and each component needs a different
+# answer: a backported upstream fix for U-Boot and a pair of patches for the
+# FSBL, both under patch/, and a PLATFORM_RISCV_ISA override for OpenSBI, in
+# sophgo_sg200x_build_opensbi() below.
+#
 
 declare -g SOPHGO_FSBL_REPO="${SOPHGO_FSBL_REPO:-https://github.com/sophgo/fsbl}"
 declare -g SOPHGO_FSBL_REF="${SOPHGO_FSBL_REF:-commit:3c47dfc743ad6cee06bca7161b352673e5c63356}" # sg200x-dev, 2026-06-30
+
+# RISC-V only: the EL3 monitor slot in fip.bin holds OpenSBI instead of the
+# prebuilt bl31.bin that ARM uses. This is sophgo/opensbi's sg200x-dev branch,
+# which is OpenSBI 0.9 plus a cvitek platform override - byte-identical to the
+# opensbi/ tree inside duo-buildroot-sdk-v2. Note that the same repo's master
+# branch is plain upstream OpenSBI 1.7 with no Sophgo support at all, so the
+# branch here matters more than usual.
+declare -g SOPHGO_OPENSBI_REPO="${SOPHGO_OPENSBI_REPO:-https://github.com/sophgo/opensbi}"
+declare -g SOPHGO_OPENSBI_REF="${SOPHGO_OPENSBI_REF:-commit:6766e9cc96df51cde91540f9a15f291bf843b682}" # sg200x-dev, 2025-01-24
 
 # Also declared by the sophgo-fip-blobs extension; default it here so the FSBL
 # build does not depend on that extension being enabled. "yes" selects the
@@ -58,6 +82,43 @@ function fetch_custom_uboot__sophgo_sg200x_fsbl() {
 	declare fsbl_subdir
 	fsbl_subdir="$(branch2dir "${SOPHGO_FSBL_REF}")"
 	declare -g SOPHGO_FSBL_DIR="${SRC}/cache/sources/sophgo-fsbl/${fsbl_subdir}"
+
+	sophgo_sg200x_patch_fsbl
+
+	[[ "${SOPHGO_FSBL_ARCH}" == "riscv" ]] || return 0
+
+	display_alert "Sophgo SG200x" "fetching OpenSBI sources" "info"
+	fetch_from_repo "${SOPHGO_OPENSBI_REPO}" "sophgo-opensbi" "${SOPHGO_OPENSBI_REF}" "yes"
+	declare opensbi_subdir
+	opensbi_subdir="$(branch2dir "${SOPHGO_OPENSBI_REF}")"
+	declare -g SOPHGO_OPENSBI_DIR="${SRC}/cache/sources/sophgo-opensbi/${opensbi_subdir}"
+}
+
+# The FSBL has no Armbian patch machinery behind it: ATFSOURCE is "none", so
+# compile_atf() - and with it ATFPATCHDIR and advanced_patch() - never runs.
+# The patches live under patch/atf/ anyway, because the FSBL is a Trusted
+# Firmware-A fork and that is where a reader will look for them.
+#
+# fetch_from_repo() has just done a 'git checkout -f' plus 'git clean -df', so
+# the tree is pristine on every build and a plain apply is enough; the
+# already-applied branch only exists so a re-run inside one build does not
+# produce a baffling failure.
+function sophgo_sg200x_patch_fsbl() {
+	declare patch_dir="${SRC}/patch/atf/fsbl-sophgo-sg200x"
+	[[ -d "${patch_dir}" ]] || return 0
+
+	declare patch
+	for patch in "${patch_dir}"/*.patch; do
+		[[ -f "${patch}" ]] || continue
+		if git -C "${SOPHGO_FSBL_DIR}" apply --check "${patch}" &> /dev/null; then
+			display_alert "Sophgo SG200x" "FSBL patch: $(basename "${patch}")" "info"
+			run_host_command_logged git -C "${SOPHGO_FSBL_DIR}" apply "${patch}"
+		elif git -C "${SOPHGO_FSBL_DIR}" apply --reverse --check "${patch}" &> /dev/null; then
+			display_alert "Sophgo SG200x" "FSBL patch already applied: $(basename "${patch}")" "info"
+		else
+			exit_with_error "FSBL patch does not apply" "$(basename "${patch}")"
+		fi
+	done
 }
 
 # Runs in the u-boot tree, after patching (which resets and cleans the tree) and
@@ -110,6 +171,14 @@ function sophgo_sg200x_cvitek_env_array() {
 }
 
 function sophgo_sg200x_export_cvitek_env() {
+	# ARCH is the awkward one: Armbian's is "riscv64"/"arm64", the vendor build
+	# wants "riscv"/"arm64". Overwriting it in the ambient environment is what
+	# makes 'make <defconfig>' work, but it must not still be overwritten when
+	# the .deb is built - dpkg then stamps "Architecture: riscv" and refuses to
+	# install it with "package architecture (riscv) does not match system
+	# (riscv64)". uboot_custom_postprocess() puts it back; see there.
+	declare -g SOPHGO_SAVED_ARCH="${ARCH}"
+
 	declare -a sophgo_cvitek_env
 	sophgo_sg200x_cvitek_env_array
 	declare kv
@@ -137,6 +206,16 @@ function post_config_uboot_target__sophgo_sg200x_cflags() {
 function uboot_custom_postprocess() {
 	: "${SOPHGO_FSBL_DIR:?SOPHGO_FSBL_DIR is not set - did fetch_custom_uboot run?}"
 
+	# Hand ARCH back to Armbian. The vendor value set in
+	# pre_config_uboot_target has done its job - 'make <defconfig>', 'make
+	# olddefconfig' and the compile are all behind us, and the compile ran under
+	# 'env -i' with its own copy anyway - while everything from here on is
+	# Armbian's, starting with the .deb's Architecture field.
+	if [[ -n "${SOPHGO_SAVED_ARCH}" && "${ARCH}" != "${SOPHGO_SAVED_ARCH}" ]]; then
+		display_alert "Sophgo SG200x" "restoring ARCH=${SOPHGO_SAVED_ARCH} (was ${ARCH})" "info"
+		export ARCH="${SOPHGO_SAVED_ARCH}"
+	fi
+
 	declare uboot_dir
 	uboot_dir="$(pwd)"
 
@@ -153,6 +232,14 @@ function uboot_custom_postprocess() {
 	declare fsbl_out="${SOPHGO_FSBL_DIR}/build/${SOPHGO_CVI_PROJECT}"
 	declare od_clk_sel="n"
 	[[ "${SOPHGO_CPU_OVERDRIVE}" == "yes" ]] && od_clk_sel="y"
+
+	# The monitor slot in fip.bin: a prebuilt bl31.bin on ARM (the FSBL picks it
+	# up from plat/*/prebuilt by itself), OpenSBI built here on RISC-V.
+	declare -a fsbl_monitor=()
+	if [[ "${SOPHGO_FSBL_ARCH}" == "riscv" ]]; then
+		sophgo_sg200x_build_opensbi "${uboot_dir}"
+		fsbl_monitor=("MONITOR_PATH=${SOPHGO_OPENSBI_FW_DYNAMIC}")
+	fi
 
 	display_alert "Sophgo SG200x" "building FSBL and packing fip.bin (OD_CLK_SEL=${od_clk_sel})" "info"
 
@@ -194,10 +281,58 @@ function uboot_custom_postprocess() {
 		"BLCP_2ND_PATH=" \
 		"LOADER_2ND_PATH=${uboot_dir}/u-boot-raw.bin" \
 		"LDFLAGS=--no-warn-rwx-segments" \
+		"${fsbl_monitor[@]}" \
 		"${CTHREADS}"
 
 	[[ -f "${fsbl_out}/fip.bin" ]] || exit_with_error "FSBL did not produce fip.bin" "${fsbl_out}"
 
 	run_host_command_logged cp -v "${fsbl_out}/fip.bin" "${uboot_dir}/fip.bin"
 	display_alert "Sophgo SG200x" "fip.bin is $(stat -c %s "${uboot_dir}/fip.bin") bytes" "info"
+}
+
+# RISC-V only. Builds the OpenSBI that goes in fip.bin's monitor slot, and sets
+# SOPHGO_OPENSBI_FW_DYNAMIC to the result. Has to run after u-boot, because it
+# embeds u-boot's own device tree - see FW_FDT_PATH below.
+function sophgo_sg200x_build_opensbi() {
+	declare uboot_dir="${1}"
+	: "${SOPHGO_OPENSBI_DIR:?SOPHGO_OPENSBI_DIR is not set - did fetch_custom_uboot run?}"
+
+	declare fdt="${uboot_dir}/arch/riscv/dts/${SOPHGO_CVI_CHIP}_${SOPHGO_CVI_BOARD}.dtb"
+	[[ -f "${fdt}" ]] || exit_with_error "u-boot did not produce a device tree for OpenSBI" "${fdt}"
+
+	display_alert "Sophgo SG200x" "building OpenSBI (monitor for fip.bin)" "info"
+
+	# FW_FDT_PATH is not optional. fw_base.S does
+	#     #ifdef FW_FDT_PATH
+	#         lla a1, fw_fdt_bin      /* Override previous arg1 */
+	#     #endif
+	# so without it OpenSBI keeps whatever a1 the FSBL happened to leave behind,
+	# which is not a device tree. The SDK points it at u-boot's dtb and so do we.
+	#
+	# PLATFORM_RISCV_ISA: OpenSBI 0.9 predates the binutils 2.38 split of zicsr
+	# and zifencei out of 'i', and lib/sbi/sbi_tlb.c has a bare fence.i. The
+	# default rv64imafdc therefore fails to assemble; spell the two out.
+	#
+	# platform-cflags-y carries -Wno-error=maybe-uninitialized for a gcc 13 false
+	# positive in fdt_reset_thead.c (clone_csrs' cnt). It is assigned, empty, in
+	# platform/generic/config.mk and nothing appends to it, so overriding it from
+	# the command line drops nothing. firmware-cflags-y would have been the more
+	# obvious hook, but it carries -fPIE -pie that we must not clobber.
+	run_host_command_logged make -C "${SOPHGO_OPENSBI_DIR}" \
+		"PLATFORM=generic" \
+		"CROSS_COMPILE=${UBOOT_COMPILER}" \
+		"CHIP_ARCH=${SOPHGO_CVI_CHIP_ARCH}" \
+		"OPENSBI_PATH=${SOPHGO_OPENSBI_DIR}" \
+		"PLATFORM_RISCV_ISA=rv64imafdc_zicsr_zifencei" \
+		"platform-cflags-y=-Wno-error=maybe-uninitialized" \
+		"FW_PAYLOAD_PATH=${uboot_dir}/u-boot-raw.bin" \
+		"FW_FDT_PATH=${fdt}" \
+		"${CTHREADS}"
+
+	declare -g SOPHGO_OPENSBI_FW_DYNAMIC="${SOPHGO_OPENSBI_DIR}/build/platform/generic/firmware/fw_dynamic.bin"
+	[[ -f "${SOPHGO_OPENSBI_FW_DYNAMIC}" ]] ||
+		exit_with_error "OpenSBI did not produce fw_dynamic.bin" "${SOPHGO_OPENSBI_FW_DYNAMIC}"
+
+	display_alert "Sophgo SG200x" \
+		"OpenSBI fw_dynamic.bin is $(stat -c %s "${SOPHGO_OPENSBI_FW_DYNAMIC}") bytes" "info"
 }
