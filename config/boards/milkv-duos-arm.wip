@@ -28,8 +28,18 @@ enable_extension "sophgo-aic8800"
 function post_family_tweaks__milkv_duos_arm() {
 	display_alert "Milk-V Duo S" "applying ARM board tweaks" "info"
 
-	# zram matters a lot more than usual at 512MB.
-	if [[ -f "${SDCARD}/etc/default/armbian-zram-config" ]]; then
-		sed -i 's/^PERCENTAGE=.*/PERCENTAGE=100/' "${SDCARD}/etc/default/armbian-zram-config"
+	# zram matters a lot more than usual at 512MB. The stock 50% gives ~240MB of
+	# swap; 100% gives a 512MB device while MEM_LIMIT_PERCENTAGE stays at its 50%
+	# default, so zram may still only occupy 256MB of physical RAM. That is the
+	# overcommit setup the shipped config file points at.
+	#
+	# The variable is ZRAM_PERCENTAGE and it ships commented out, so the pattern
+	# has to tolerate the leading "# " - an earlier version anchored on
+	# ^PERCENTAGE= and silently matched nothing for every build.
+	declare zram_conf="${SDCARD}/etc/default/armbian-zram-config"
+	if [[ -f "${zram_conf}" ]]; then
+		sed -i 's/^#\?\s*ZRAM_PERCENTAGE=.*/ZRAM_PERCENTAGE=100/' "${zram_conf}"
+		grep -q '^ZRAM_PERCENTAGE=100$' "${zram_conf}" ||
+			exit_with_error "failed to set ZRAM_PERCENTAGE" "${zram_conf}"
 	fi
 }
