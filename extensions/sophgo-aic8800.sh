@@ -67,13 +67,27 @@ function custom_kernel_config__sophgo_aic8800_modules() {
 	kernel_config_set_m CONFIG_CFG80211
 }
 
-function pre_umount_final_image__sophgo_aic8800_firmware() {
+# Deliberately post_family_tweaks and not pre_umount_final_image: the rootfs is
+# rsynced from ${SDCARD} to the mounted image early in rootfs-to-image.sh, and
+# update_initramfs runs right after that - both well before pre_umount_final_image
+# fires. Writing to ${SDCARD} from that later hook still "succeeds", because the
+# directory is a live host path, but the files never reach the image. That is
+# exactly what shipped in the 2026-07-28 arm64 test image: the driver looped
+# forever on "fw_patch_table_8800d80_u02.bin file failed to open", power-cycling
+# the chip every ~1.7s. Keep this copy on the ${SDCARD} side of the rsync.
+function post_family_tweaks__sophgo_aic8800_firmware() {
 	declare fw_src="${SRC}/packages/blobs/sophgo/milkv-duos/aic8800-firmware"
 	declare fw_dst="${SDCARD}/lib/firmware/aic8800"
 
 	display_alert "Sophgo AIC8800" "installing firmware blobs" "info"
 	run_host_command_logged mkdir -p "${fw_dst}"
 	run_host_command_logged cp -v "${fw_src}"/* "${fw_dst}/"
+
+	# The driver opens CONFIG_AIC_FW_PATH/fw_patch_table_8800d80_u02.bin by
+	# absolute path and has no fallback; if it is missing the retry loop above
+	# is what the user sees. Fail the build here instead.
+	[[ -f "${fw_dst}/fw_patch_table_8800d80_u02.bin" ]] ||
+		exit_with_error "AIC8800 firmware did not land in the rootfs" "${fw_dst}"
 }
 
 function post_family_tweaks__sophgo_aic8800_modprobe() {
