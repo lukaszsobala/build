@@ -61,8 +61,19 @@ declare -g SOPHGO_FSBL_REF="${SOPHGO_FSBL_REF:-commit:3c47dfc743ad6cee06bca7161b
 declare -g SOPHGO_OPENSBI_REPO="${SOPHGO_OPENSBI_REPO:-https://github.com/sophgo/opensbi}"
 declare -g SOPHGO_OPENSBI_REF="${SOPHGO_OPENSBI_REF:-commit:6766e9cc96df51cde91540f9a15f291bf843b682}" # sg200x-dev, 2025-01-24
 
-# "yes" selects the 1050MHz OD_CLK_SEL variant over the 850MHz vendor default.
-# This replaces queenkjuul's fsbl patch 0002, which hardcoded the same thing.
+# CPU overdrive: "yes" builds the FSBL with OD_CLK_SEL=y, which makes bl2_main
+# pick CLK_OD and so sys_pll_od() instead of sys_pll_nd() - 1050MHz rather than
+# the 850MHz vendor default. It also feeds plat/cv181x/ddr/ddr.mk, so the DDR
+# timing is built to match; this is a different bootloader binary, not a knob
+# Linux can turn. Replaces queenkjuul's fsbl patch 0002, which hardcoded it.
+#
+# Pass it to the build:
+#     ./compile.sh build BOARD=milkv-duos-riscv BRANCH=edge SOPHGO_CPU_OVERDRIVE=yes
+#
+# It is listed in artifact-uboot.sh's vars_to_hash, so the two settings produce
+# different u-boot artifact versions and both can sit in the cache at once.
+# Without that it would be silently ignored on any build that had a cached
+# artifact, which is every build after the first.
 declare -g SOPHGO_CPU_OVERDRIVE="${SOPHGO_CPU_OVERDRIVE:-no}"
 
 # Where the vendored cvitek board files live.
