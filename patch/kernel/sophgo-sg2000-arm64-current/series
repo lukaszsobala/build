@@ -1,6 +1,0 @@
-# Kernel patches for Sophgo SG2000 edge branch
-# These patches add support for the Milkv Duo S board
-
-# Device tree for Milkv Duo S (ARM64 mode)
-0001-arm64-dts-sophgo-add-milkv-duo-s-device-tree.patch
-0002-arm64-dts-sophgo-add-sg2000-milkv-duo-s-to-makefile.patch

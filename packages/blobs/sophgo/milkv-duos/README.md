@@ -1,122 +1,91 @@
-# Sophgo SG2000 Bootloader Blobs for Milkv Duo S
+# Sophgo SG200x bootloader blobs (Milk-V Duo S)
 
-This directory should contain the `fip.bin` bootloader blob files for the Milkv Duo S board.
+`fip.bin` is the single file the SG2000 BootROM knows how to load. It bundles:
 
-## Required Files
+1. **FSBL** — brings up DDR and the SD interface, and decides *which core runs
+   Linux*: the C906 RISC-V core or the Cortex-A53. This is why RISC-V and ARM
+   mode need different blobs, and why there is no runtime switch on the board.
+2. **OpenSBI** (RISC-V only).
+3. **U-Boot 2021.10**, from the Sophgo/CVITEK vendor fork.
 
-- `fip.bin` - Combined FSBL + OpenSBI + U-Boot firmware image
+The BootROM looks for a file literally named `fip.bin` in the first FAT
+partition of the card. Armbian's `sophgo-fip-blobs` extension copies the right
+blob to `/boot/fip.bin` at the end of the image build.
 
-## How to Obtain
+## Blobs shipped here
 
-The `fip.bin` can be obtained from:
+| File | Mode | CPU |
+| --- | --- | --- |
+| `fip-riscv64.bin` | RISC-V (C906) | 850 MHz (vendor default) |
+| `fip-riscv64-od.bin` | RISC-V (C906) | 1050 MHz (overdrive) |
 
-### Option 1: Extract from Official Sophgo SDK Images
+Build with `SOPHGO_CPU_OVERDRIVE=yes` to select the overdrive variant.
 
-Download the official Milkv Duo S SD card images from:
-https://github.com/milkv-duo/duo-buildroot-sdk-v2/releases
+Both come from [queenkjuul/milkv-duo-ubuntu][qkj] (`milkv-bootloader/duos/`),
+built from `duo-buildroot-sdk-v2` with the patches in `bootloader-patches/`.
 
-#### For RISC-V (from Fishwaldo's image):
+**There is no ARM blob here.** Nobody publishes a distroboot-enabled ARM
+`fip.bin` for the Duo S, so `milkv-duos-arm` images are currently written
+*without* a bootloader unless you build one — see below. The stock ARM
+`fip.bin` from the Milk-V SDK images will *not* work: it boots a fixed FIT
+image (`boot.sd`) rather than scanning for `/extlinux/extlinux.conf`.
 
-1. Download `duos_sd.img` from https://github.com/Fishwaldo/sophgo-sg200x-debian/releases
+## Why distroboot matters
 
-2. Mount the boot partition and extract fip.bin:
+The stock vendor U-Boot runs `run sdboot`, which `fatload`s a single monolithic
+FIT image from the card and boots it. That makes kernel upgrades through `apt`
+impossible without regenerating the FIT.
+
+`bootloader-patches/0001-u-boot-cvi181x-enable-distroboot-for-cvi181x.patch`
+switches `CONFIG_BOOTCOMMAND` to `run distro_bootcmd || run sdboot` and defines
+the `*_addr_r` load addresses distroboot needs (notably `fdt_addr_r=0x82200000`,
+away from where the kernel decompresses). U-Boot then walks the partitions
+marked bootable in the MBR and parses `/extlinux/extlinux.conf`, which is
+exactly what Armbian writes with `SRC_EXTLINUX=yes`.
+
+## Building a blob yourself
+
+Needed for ARM mode; also the route to rebuilding the RISC-V blob from source.
+
+1. Clone the vendor SDK and its host tools:
+
    ```bash
-   sudo mkdir -p /tmp/duos-boot
-   sudo mount -o loop,ro,offset=512 duos_sd.img /tmp/duos-boot
-   cp /tmp/duos-boot/fip.bin fip-riscv.bin
-   sudo umount /tmp/duos-boot
+   git clone https://github.com/milkv-duo/duo-buildroot-sdk-v2.git
+   cd duo-buildroot-sdk-v2
+   git clone https://github.com/milkv-duo/host-tools.git
    ```
 
-#### For ARM64 (from Sophgo SDK v2):
+2. Apply the patches from `bootloader-patches/`:
 
-1. Download `milkv-duos-glibc-arm64-sd_v2.0.1.img` (or similar) from the SDK releases
-
-2. Mount the boot partition (starts at sector 1, offset 512) and extract fip.bin:
    ```bash
-   sudo mkdir -p /tmp/duos-arm64-boot
-   sudo mount -o loop,ro,offset=512 milkv-duos-glibc-arm64-sd_v2.0.1.img /tmp/duos-arm64-boot
-   cp /tmp/duos-arm64-boot/fip.bin fip-arm64.bin
-   sudo umount /tmp/duos-arm64-boot
+   git am /path/to/armbian/packages/blobs/sophgo/milkv-duos/bootloader-patches/*.patch
    ```
 
-3. Verify the extracted blob:
+   `0001` and `0004` touch `u-boot-2021.10/include/configs/cv181x-asic.h` and are
+   shared by the ARM and RISC-V builds of the CV181x/SG2000 family. `0002` (CPU
+   overdrive) is applied to the RISC-V board defconfig; for ARM apply the same
+   `CONFIG_OD_CLK_SEL=y` line to the ARM board defconfig instead.
+
+3. Build the FSBL for the board you want:
+
    ```bash
-   file fip-arm64.bin        # Should show "data"
-   xxd -l 16 fip-arm64.bin   # Should start with "CVBL01"
+   # RISC-V
+   source build/cvisetup.sh && defconfig sg2000_milkv_duos_musl_riscv64_sd && build_fsbl
+   # ARM
+   source build/cvisetup.sh && defconfig sg2000_milkv_duos_musl_arm64_sd && build_fsbl
    ```
 
-### Option 2: Build from Fishwaldo's sophgo-sg200x-debian
+4. The result lands in `install/soc_<board>/fip.bin`. Drop it in here as
+   `fip-arm64.bin` or `fip-riscv64.bin`.
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Fishwaldo/sophgo-sg200x-debian.git
-   ```
+## Caveats
 
-2. Build the fsbl package (requires Docker):
-   ```bash
-   podman run --privileged -it --rm \
-     -v ./configs/:/configs \
-     -v ./image:/output \
-     ghcr.io/fishwaldo/sophgo-sg200x-debian:master \
-     make BOARD=duos fsbl
-   ```
+- `0005-u-boot-set-root-partition-to-mmcblk0p3.patch` hardcodes
+  `root=/dev/mmcblk0p3` into the `sdboot` *fallback* path, matching the upstream
+  three-partition layout. Armbian uses two partitions and passes `root=UUID=…`
+  from `extlinux.conf`, so this only affects the fallback, which Armbian does not
+  install anyway.
+- These are redistributable binaries built from the publicly available Sophgo
+  SDK; the FSBL portion is vendor code without published sources.
 
-3. Extract `fip.bin` from the resulting debian package or build directory
-
-### Option 3: Download from Fishwaldo's Releases
-
-1. Go to: https://github.com/Fishwaldo/sophgo-sg200x-debian/releases
-
-2. Download the `duos_sd.img` release
-
-3. Extract `fip.bin` from the raw sectors as shown in Option 1
-
-## Architecture Note
-
-**IMPORTANT:** The Milkv Duo S requires **different** `fip.bin` files for ARM64 and RISC-V modes.
-Each blob must be built specifically for the target architecture with the correct board identifier.
-
-The FSBL contains a board identifier (e.g., "Milk-V DuoS") that configures:
-- DDR initialization parameters
-- SD/eMMC interface settings
-- Clock frequencies and hardware initialization
-
-If the board identifier is missing or incorrect, boot will fail with errors like:
-```
-Mount SD failed (13)
-eMMC initializing failed
-Boot failed (8)
-```
-
-### Required Files
-
-- `fip-arm64.bin` - Built for ARM64 (Cortex-A53) mode
-- `fip-riscv.bin` - Built for RISC-V (C906) mode
-
-### Verification
-
-Verify the blobs have the correct format:
-```bash
-# Check header (should show "CVBL01")
-xxd -l 16 fip-arm64.bin
-xxd -l 16 fip-riscv.bin
-
-# Check for board identifier (RISC-V blob should have it)
-strings fip-riscv.bin | grep "Milk-V DuoS"
-```
-
-**Note:** The ARM64 blob from Sophgo SDK v2.x may not contain the "Milk-V DuoS" string,
-but should still work as it's from the official Duo S ARM64 image.
-
-The build system will automatically use the appropriate file based on the target architecture.
-
-## Boot Chain
-
-The boot sequence is:
-1. BootROM (built into SoC)
-2. FSBL (First Stage Boot Loader) - initializes DDR, loads OpenSBI + U-Boot
-3. OpenSBI (RISC-V only) - provides supervisor binary interface
-4. U-Boot - loads kernel via extlinux.conf
-5. Linux kernel
-
-The `fip.bin` contains FSBL, OpenSBI (for RISC-V), and U-Boot combined.
+[qkj]: https://github.com/queenkjuul/milkv-duo-ubuntu
