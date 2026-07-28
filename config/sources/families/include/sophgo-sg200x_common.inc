@@ -43,7 +43,24 @@ function post_create_partitions__sophgo_sg200x_boot_partition_flags() {
 }
 
 # Nothing to dd onto raw sectors: the BootROM reads fip.bin as a file from the
-# FAT partition, and the sophgo-fip-blobs extension puts it there.
+# FAT partition, not from a fixed offset. write_uboot_platform() only gets a
+# block device, so the copy happens in the hook below instead - and, for
+# families that ship a prebuilt blob, in the sophgo-fip-blobs extension.
 function write_uboot_platform() {
 	return 0
+}
+
+# Only fires when a bootloader was actually built (BOOTCONFIG != none). Runs
+# with ${MOUNT} still mounted, and is handed the extracted u-boot package as
+# UBOOT_CHROOT_DIR.
+function post_write_uboot_platform__sophgo_sg200x_install_fip() {
+	declare fip="${UBOOT_CHROOT_DIR}/fip.bin"
+
+	if [[ ! -f "${fip}" ]]; then
+		display_alert "Sophgo SG200x" "no fip.bin in the u-boot package - image will NOT boot" "wrn"
+		return 0
+	fi
+
+	display_alert "Sophgo SG200x" "installing built fip.bin -> /boot/fip.bin" "info"
+	run_host_command_logged cp -v "${fip}" "${MOUNT}/boot/fip.bin"
 }

@@ -54,6 +54,13 @@ function sophgo_find_fip_blob() {
 }
 
 function pre_umount_final_image__write_sophgo_fip_blob() {
+	# Families that build their own bootloader install it from the u-boot
+	# package instead; see sophgo-sg200x_common.inc.
+	if [[ "${BOOTCONFIG}" != "none" ]]; then
+		display_alert "Sophgo fip.bin" "built from source, not using a prebuilt blob" "info"
+		return 0
+	fi
+
 	declare fip_blob
 	fip_blob="$(sophgo_find_fip_blob)" || true
 

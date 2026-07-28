@@ -6,16 +6,14 @@
 # is decided by the FSBL inside fip.bin, so the choice is made by writing this
 # image (ARM) or the milkv-duos-riscv one, not by a switch on the board.
 #
-# Note: no distroboot-enabled ARM fip.bin is published upstream. This image
-# needs one built from the vendor SDK - see
-# packages/blobs/sophgo/milkv-duos/README.md - and will otherwise be written
-# without a bootloader.
+# Unlike the RISC-V variant, the bootloader here is built from source: no
+# distroboot-enabled ARM fip.bin is published anywhere, so there is no blob to
+# ship. See config/sources/families/include/sophgo-sg200x_uboot.inc.
 #
 # https://milkv.io/duo-s
 BOARD_NAME="Milk-V Duo S"
 BOARDFAMILY="sophgo-sg200x-arm64"
 BOARD_MAINTAINER=""
-BOOTCONFIG="none"
 KERNEL_TARGET="edge,bleedingedge"
 BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
 SERIALCON="ttyS0"

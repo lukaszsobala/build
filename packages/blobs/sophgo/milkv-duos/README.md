@@ -12,6 +12,12 @@ The BootROM looks for a file literally named `fip.bin` in the first FAT
 partition of the card. Armbian's `sophgo-fip-blobs` extension copies the right
 blob to `/boot/fip.bin` at the end of the image build.
 
+> **ARM mode no longer uses this directory.** `milkv-duos-arm` builds its own
+> `fip.bin` from source on every build — see
+> `config/sources/families/include/sophgo-sg200x_uboot.inc` and
+> `packages/sophgo-sg200x/u-boot/`. The blobs below are only for the RISC-V
+> family, which has not been converted yet.
+
 ## Blobs shipped here
 
 | File | Mode | CPU |
@@ -24,11 +30,11 @@ Build with `SOPHGO_CPU_OVERDRIVE=yes` to select the overdrive variant.
 Both come from [queenkjuul/milkv-duo-ubuntu][qkj] (`milkv-bootloader/duos/`),
 built from `duo-buildroot-sdk-v2` with the patches in `bootloader-patches/`.
 
-**There is no ARM blob here.** Nobody publishes a distroboot-enabled ARM
-`fip.bin` for the Duo S, so `milkv-duos-arm` images are currently written
-*without* a bootloader unless you build one — see below. The stock ARM
-`fip.bin` from the Milk-V SDK images will *not* work: it boots a fixed FIT
-image (`boot.sd`) rather than scanning for `/extlinux/extlinux.conf`.
+**There is no ARM blob here, and there does not need to be.** Nobody publishes a
+distroboot-enabled ARM `fip.bin` for the Duo S, so rather than commit one,
+`milkv-duos-arm` builds it during the normal Armbian u-boot artifact build. The
+stock ARM `fip.bin` from the Milk-V SDK images would not work anyway: it boots a
+fixed FIT image (`boot.sd`) rather than scanning for `/extlinux/extlinux.conf`.
 
 ## Why distroboot matters
 
@@ -43,40 +49,35 @@ away from where the kernel decompresses). U-Boot then walks the partitions
 marked bootable in the MBR and parses `/extlinux/extlinux.conf`, which is
 exactly what Armbian writes with `SRC_EXTLINUX=yes`.
 
-## Building a blob yourself
+## Rebuilding a RISC-V blob by hand
 
-Needed for ARM mode; also the route to rebuilding the RISC-V blob from source.
+Only needed while the RISC-V family still consumes prebuilt blobs. The
+supported route is the one ARM already uses — see
+`config/sources/families/include/sophgo-sg200x_uboot.inc` — which needs an
+OpenSBI step added for RISC-V.
 
-1. Clone the vendor SDK and its host tools:
+```bash
+git clone --depth 1 https://github.com/milkv-duo/duo-buildroot-sdk-v2.git
+cd duo-buildroot-sdk-v2
+git am /path/to/armbian/packages/blobs/sophgo/milkv-duos/bootloader-patches/*.patch
+source build/envsetup_soc.sh
+defconfig sg2000_milkv_duos_musl_riscv64_sd
+build_fsbl
+```
 
-   ```bash
-   git clone https://github.com/milkv-duo/duo-buildroot-sdk-v2.git
-   cd duo-buildroot-sdk-v2
-   git clone https://github.com/milkv-duo/host-tools.git
-   ```
+The result lands in `install/soc_<board>/fip.bin`; drop it in here as
+`fip-riscv64.bin`.
 
-2. Apply the patches from `bootloader-patches/`:
+Two things break with a modern toolchain, both worked around in the Armbian
+build and needed here too:
 
-   ```bash
-   git am /path/to/armbian/packages/blobs/sophgo/milkv-duos/bootloader-patches/*.patch
-   ```
+- gcc >= 13 rejects U-Boot 2021.10's `common/command.c` — pass
+  `KCFLAGS=-Wno-error=enum-int-mismatch`.
+- binutils >= 2.39 warns about the FSBL's RWX `LOAD` segment, and the FSBL links
+  with `--fatal-warnings` — pass `LDFLAGS=--no-warn-rwx-segments`.
 
-   `0001` and `0004` touch `u-boot-2021.10/include/configs/cv181x-asic.h` and are
-   shared by the ARM and RISC-V builds of the CV181x/SG2000 family. `0002` (CPU
-   overdrive) is applied to the RISC-V board defconfig; for ARM apply the same
-   `CONFIG_OD_CLK_SEL=y` line to the ARM board defconfig instead.
-
-3. Build the FSBL for the board you want:
-
-   ```bash
-   # RISC-V
-   source build/cvisetup.sh && defconfig sg2000_milkv_duos_musl_riscv64_sd && build_fsbl
-   # ARM
-   source build/cvisetup.sh && defconfig sg2000_milkv_duos_musl_arm64_sd && build_fsbl
-   ```
-
-4. The result lands in `install/soc_<board>/fip.bin`. Drop it in here as
-   `fip-arm64.bin` or `fip-riscv64.bin`.
+FreeRTOS for the companion C906L core needs `cmake`; it can be skipped entirely
+with `CONFIG_ENABLE_FREERTOS=` since Linux loads that firmware via remoteproc.
 
 ## Caveats
 
@@ -84,8 +85,11 @@ Needed for ARM mode; also the route to rebuilding the RISC-V blob from source.
   `root=/dev/mmcblk0p3` into the `sdboot` *fallback* path, matching the upstream
   three-partition layout. Armbian uses two partitions and passes `root=UUID=…`
   from `extlinux.conf`, so this only affects the fallback, which Armbian does not
-  install anyway.
+  install anyway. It is not carried in the Armbian-side patch set.
 - These are redistributable binaries built from the publicly available Sophgo
-  SDK; the FSBL portion is vendor code without published sources.
+  SDK. Contrary to what is often assumed, the FSBL *is* open source
+  (`github.com/sophgo/fsbl`); the only prebuilt pieces are the ARM EL3 monitor
+  `bl31.bin` and `bl32.bin`, ~45 KiB together, which ship inside that repo at
+  `plat/cv181x/prebuilt/`.
 
 [qkj]: https://github.com/queenkjuul/milkv-duo-ubuntu
