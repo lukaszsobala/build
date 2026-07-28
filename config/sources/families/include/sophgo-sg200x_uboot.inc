@@ -61,9 +61,8 @@ declare -g SOPHGO_FSBL_REF="${SOPHGO_FSBL_REF:-commit:3c47dfc743ad6cee06bca7161b
 declare -g SOPHGO_OPENSBI_REPO="${SOPHGO_OPENSBI_REPO:-https://github.com/sophgo/opensbi}"
 declare -g SOPHGO_OPENSBI_REF="${SOPHGO_OPENSBI_REF:-commit:6766e9cc96df51cde91540f9a15f291bf843b682}" # sg200x-dev, 2025-01-24
 
-# Also declared by the sophgo-fip-blobs extension; default it here so the FSBL
-# build does not depend on that extension being enabled. "yes" selects the
-# 1050MHz OD_CLK_SEL variant over the 850MHz vendor default.
+# "yes" selects the 1050MHz OD_CLK_SEL variant over the 850MHz vendor default.
+# This replaces queenkjuul's fsbl patch 0002, which hardcoded the same thing.
 declare -g SOPHGO_CPU_OVERDRIVE="${SOPHGO_CPU_OVERDRIVE:-no}"
 
 # Where the vendored cvitek board files live.
@@ -83,7 +82,7 @@ function fetch_custom_uboot__sophgo_sg200x_fsbl() {
 	fsbl_subdir="$(branch2dir "${SOPHGO_FSBL_REF}")"
 	declare -g SOPHGO_FSBL_DIR="${SRC}/cache/sources/sophgo-fsbl/${fsbl_subdir}"
 
-	sophgo_sg200x_patch_fsbl
+	sophgo_sg200x_apply_patches "fsbl-sophgo-sg200x" "${SOPHGO_FSBL_DIR}" "FSBL"
 
 	[[ "${SOPHGO_FSBL_ARCH}" == "riscv" ]] || return 0
 
@@ -92,31 +91,35 @@ function fetch_custom_uboot__sophgo_sg200x_fsbl() {
 	declare opensbi_subdir
 	opensbi_subdir="$(branch2dir "${SOPHGO_OPENSBI_REF}")"
 	declare -g SOPHGO_OPENSBI_DIR="${SRC}/cache/sources/sophgo-opensbi/${opensbi_subdir}"
+
+	sophgo_sg200x_apply_patches "opensbi-sophgo-sg200x" "${SOPHGO_OPENSBI_DIR}" "OpenSBI"
 }
 
-# The FSBL has no Armbian patch machinery behind it: ATFSOURCE is "none", so
-# compile_atf() - and with it ATFPATCHDIR and advanced_patch() - never runs.
-# The patches live under patch/atf/ anyway, because the FSBL is a Trusted
-# Firmware-A fork and that is where a reader will look for them.
+# Neither the FSBL nor OpenSBI has Armbian patch machinery behind it: ATFSOURCE
+# is "none", so compile_atf() - and with it ATFPATCHDIR and advanced_patch() -
+# never runs. Both sets live under patch/atf/ regardless, because both fill the
+# monitor role that bl31.bin fills on ARM, and that is where a reader will look.
 #
 # fetch_from_repo() has just done a 'git checkout -f' plus 'git clean -df', so
-# the tree is pristine on every build and a plain apply is enough; the
+# each tree is pristine on every build and a plain apply is enough; the
 # already-applied branch only exists so a re-run inside one build does not
 # produce a baffling failure.
-function sophgo_sg200x_patch_fsbl() {
-	declare patch_dir="${SRC}/patch/atf/fsbl-sophgo-sg200x"
+function sophgo_sg200x_apply_patches() {
+	declare patch_dir="${SRC}/patch/atf/${1}"
+	declare target_dir="${2}"
+	declare label="${3}"
 	[[ -d "${patch_dir}" ]] || return 0
 
 	declare patch
 	for patch in "${patch_dir}"/*.patch; do
 		[[ -f "${patch}" ]] || continue
-		if git -C "${SOPHGO_FSBL_DIR}" apply --check "${patch}" &> /dev/null; then
-			display_alert "Sophgo SG200x" "FSBL patch: $(basename "${patch}")" "info"
-			run_host_command_logged git -C "${SOPHGO_FSBL_DIR}" apply "${patch}"
-		elif git -C "${SOPHGO_FSBL_DIR}" apply --reverse --check "${patch}" &> /dev/null; then
-			display_alert "Sophgo SG200x" "FSBL patch already applied: $(basename "${patch}")" "info"
+		if git -C "${target_dir}" apply --check "${patch}" &> /dev/null; then
+			display_alert "Sophgo SG200x" "${label} patch: $(basename "${patch}")" "info"
+			run_host_command_logged git -C "${target_dir}" apply "${patch}"
+		elif git -C "${target_dir}" apply --reverse --check "${patch}" &> /dev/null; then
+			display_alert "Sophgo SG200x" "${label} patch already applied: $(basename "${patch}")" "info"
 		else
-			exit_with_error "FSBL patch does not apply" "$(basename "${patch}")"
+			exit_with_error "${label} patch does not apply" "$(basename "${patch}")"
 		fi
 	done
 }

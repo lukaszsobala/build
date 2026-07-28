@@ -44,8 +44,7 @@ function post_create_partitions__sophgo_sg200x_boot_partition_flags() {
 
 # Nothing to dd onto raw sectors: the BootROM reads fip.bin as a file from the
 # FAT partition, not from a fixed offset. write_uboot_platform() only gets a
-# block device, so the copy happens in the hook below instead - and, for
-# families that ship a prebuilt blob, in the sophgo-fip-blobs extension.
+# block device, so the copy happens in the hook below instead.
 function write_uboot_platform() {
 	return 0
 }

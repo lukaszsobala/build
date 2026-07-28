@@ -22,7 +22,6 @@ SRC_CMDLINE="earlycon console=ttyS0,115200"
 # 512MB of RAM does not go far; keep the userspace lean.
 PACKAGE_LIST_BOARD_REMOVE="snapd cloud-init"
 
-enable_extension "sophgo-fip-blobs"
 enable_extension "sophgo-aic8800"
 
 function post_family_tweaks__milkv_duos_arm() {
