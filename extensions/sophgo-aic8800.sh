@@ -33,8 +33,12 @@ function post_family_config__sophgo_aic8800_fetch() {
 }
 
 function custom_kernel_config__sophgo_aic8800_modules() {
-	# Rebuild the kernel when the driver revision changes.
+	declare -a patches=()
+	mapfile -t patches < <(find "${SRC}/patch/misc/sophgo-aic8800" -maxdepth 1 -name '*.patch' | sort)
+
+	# Rebuild the kernel when the driver revision or the patches change.
 	kernel_config_modifying_hashes+=("sophgo_aic8800=${AIC8800_REF}")
+	kernel_config_modifying_hashes+=("sophgo_aic8800_patches=$(cat /dev/null "${patches[@]}" | sha256sum | cut -d' ' -f1)")
 
 	# Also called during config dumping / version calculation, with no kernel tree.
 	[[ ! -f .config ]] && return 0
@@ -47,6 +51,16 @@ function custom_kernel_config__sophgo_aic8800_modules() {
 	run_host_command_logged rm -rf "${driver_dir}"
 	run_host_command_logged mkdir -p "${driver_dir}"
 	run_host_command_logged cp -a "${AIC8800_SRC_DIR}/aicsemi/." "${driver_dir}/"
+
+	# The vendor sources are not maintained against new kernels; the patches
+	# here are what keeps them building. They are applied to the copy in the
+	# kernel tree, not to the shared cache/sources checkout.
+	declare patch_file
+	for patch_file in "${patches[@]}"; do
+		display_alert "Sophgo AIC8800" "applying $(basename "${patch_file}")" "info"
+		run_host_command_logged patch --batch -p1 -d "${kernel_work_dir}" "<" "${patch_file}" ||
+			exit_with_error "AIC8800 patch did not apply" "$(basename "${patch_file}")"
+	done
 
 	# Hook the new vendor directory into the wireless Kconfig and Makefile.
 	if ! grep -q "aicsemi/Kconfig" "${wireless_dir}/Kconfig"; then
