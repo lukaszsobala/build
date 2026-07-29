@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Armbian <info@armbian.com>
+Date: Thu, 30 Jul 2026 01:20:00 +0200
+Subject: [PATCH] riscv: dts: sophgo: default the Milk-V Duo S USB port to host
+ mode
+
+The Duo S shares one dwc2 controller between the Type-C receptacle and the
+Type-A port, and mainline brings it up with dr_mode = "otg" and no way to
+choose. Board-level plumbing is missing too: phy-cv1800-usb2.c owns the ID
+override and VBUS_POWER bits in the PHY's syscon register, but nothing drives
+the two GPIOs that gate power to the Type-A port, so a peripheral plugged in
+there never comes up.
+
+The known userspace answer to this (queenkjuul's milkv-usb-duos) writes the
+syscon register through /dev/mem and drives the two lines with libgpiod. That
+races the PHY driver's regmap and clobbers VBUS_POWER, which the write of a
+whole 32-bit word cannot preserve. Everything it does has a device tree
+equivalent in this kernel:
+
+  - role-switch-default-mode = "host" is read by dwc2_ovr_init(), which forces
+    host mode at probe. usb-role-switch keeps the switch registered, so
+    /sys/class/usb_role/.../role can still select device at runtime, and
+    dwc2 calls phy_set_mode() on the way, which is the supported path to the
+    same syscon bits.
+
+  - The GPIOs become a fixed regulator each. USB_VBUS_EN is XGPIOB_5 and AUX0
+    is XGPIOA_30 in mux function 3, per Milk-V's own pinmux table; AUX0's
+    role on the board is undocumented, but it is absent from the Duo 256M
+    variant of the same script, so it is Duo S specific. They are chained
+    through vin-supply to keep them in the order the script uses.
+
+  - The pads are muxed from the regulator nodes, not from &usb, so the mux is
+    applied before the regulators drive the lines: the pin controller is
+    strict, implements no gpio_request_enable, and the GPIO banks declare no
+    gpio-ranges, so requesting a line does not mux its pad.
+
+VBUS follows phy_power_on() rather than the role, so it stays on in device
+mode. Modelling the connector with gpio-usb-b-connector would fix that and
+give real OTG detection - USB_ID and USB_VBUS_DET are XGPIOB_4 and XGPIOB_6 -
+but whether either is wired on this board has not been established, and a
+floating ID pin would be worse than a fixed default.
+
+Signed-off-by: Armbian <info@armbian.com>
+---
+diff --git a/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts b/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
+index e25a1ab..ea66010 100644
+--- a/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
++++ b/arch/riscv/boot/dts/sophgo/sg2000-milkv-duo-s.dts
+@@ -32,6 +32,39 @@
+ 		stdout-path = "serial0:115200n8";
+ 	};
+ 
++	/*
++	 * Type-A port power. Two board lines have to be driven for the port to
++	 * come up, and neither is wired to anything the USB controller drives by
++	 * itself: USB_VBUS_EN, which per Milk-V's own pinmux table is XGPIOB_5
++	 * when muxed to function 3, and AUX0, which is XGPIOA_30. They are
++	 * chained so the regulator core brings AUX0 up first and takes it down
++	 * last, which is the order the vendor's userspace switcher uses.
++	 *
++	 * AUX0's exact role on this board is undocumented - the Duo 256M switcher
++	 * needs no GPIO at all, so it is specific to the Duo S - hence the plain
++	 * name rather than a guess at what it gates.
++	 */
++	reg_usb_aux0: regulator-usb-aux0 {
++		compatible = "regulator-fixed";
++		regulator-name = "usb-aux0";
++		gpio = <&porta 30 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++		pinctrl-names = "default";
++		pinctrl-0 = <&usb_aux0_cfg>;
++	};
++
++	reg_usb_vbus: regulator-usb-vbus {
++		compatible = "regulator-fixed";
++		regulator-name = "usb-vbus";
++		regulator-min-microvolt = <5000000>;
++		regulator-max-microvolt = <5000000>;
++		gpio = <&portb 5 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++		vin-supply = <&reg_usb_aux0>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&usb_vbus_en_cfg>;
++	};
++
+ 	sound_card {
+ 		compatible = "simple-audio-card";
+ 		simple-audio-card,name = "Milk-V Duo S Built-in Audio";
+@@ -190,11 +223,49 @@
+ 	status = "okay";
+ };
+ 
++/*
++ * The pads are muxed from the regulator nodes rather than from &usb, so the
++ * mux is in place before the regulators drive the lines. The pin controller is
++ * strict and has no gpio_request_enable, and the GPIO banks declare no
++ * gpio-ranges, so requesting the line does not mux the pad by itself.
++ */
++&pinctrl {
++	usb_aux0_cfg: usb-aux0-cfg {
++		usb-aux0-pins {
++			pinmux = <PINMUX(PIN_AUX0, 3)>;
++		};
++	};
++
++	usb_vbus_en_cfg: usb-vbus-en-cfg {
++		usb-vbus-en-pins {
++			pinmux = <PINMUX(PIN_USB_VBUS_EN, 3)>;
++		};
++	};
++};
++
++/*
++ * Host by default: role-switch-default-mode is what dwc2_ovr_init() reads to
++ * force the controller into host mode at probe. The role switch stays
++ * registered, so /sys/class/usb_role/4340000.usb-role-switch/role still moves
++ * it to device at runtime, and phy_set_mode() flips the ID override in the
++ * PHY's syscon register on the way - the register a userspace switcher would
++ * otherwise poke through /dev/mem.
++ */
+ &usb {
+ 	dr_mode = "otg";
++	usb-role-switch;
++	role-switch-default-mode = "host";
+ 	status = "okay";
+ };
+ 
++/*
++ * phy-supply is enabled by phy_power_on(), which dwc2 calls when it brings the
++ * controller up. That is not role-aware: VBUS stays on in device mode too.
++ */
++&usbphy {
++	phy-supply = <&reg_usb_vbus>;
++};
++
+ &wdt {
+ 	status = "okay";
+ };
+-- 
+2.34.1
+

@@ -5,7 +5,7 @@
 pending LKML postings for the SG2000/SG2002 (CV181x) SoCs plus a few fixes of
 its own. They are `git am`-format and apply cleanly to **Linux 7.0**.
 
-`0038` and `0039` are Armbian's, and are described below.
+`0038` – `0041` are Armbian's, and are described below.
 
 ## Why one series for two architectures
 
@@ -23,8 +23,9 @@ RISC-V-only are in fact needed by both builds, and both families point
 `KERNELPATCHDIR` at this directory.
 
 The reverse also holds, which is why there is no second directory for arm64:
-the patches that touch only `arch/arm64/boot/dts/sophgo/` (`0002` and `0039`)
-are inert on a RISC-V build, since it never descends into `arch/arm64`. Keeping
+the patches that touch only `arch/arm64/boot/dts/sophgo/` (`0002`, `0039` and
+`0041`) are inert on a RISC-V build, since it never descends into
+`arch/arm64`. Keeping
 them here means one series to rebase when the kernel is bumped, and no way for
 the two architectures' trees to drift apart.
 
@@ -55,6 +56,36 @@ adds the C906L coprocessor reserved-memory region and remoteproc node to
 
 It applies on top of `0002` and touches nothing outside `arch/arm64`, so a
 RISC-V build carries it without noticing.
+
+## 0040, 0041 — Duo S USB defaults to host
+
+`0015` enables the single dwc2 controller as `dr_mode = "otg"` but leaves the
+role undecided, and nothing drives the two board lines that power the Type-A
+port, so a peripheral plugged in there stays dark. These two patches - one per
+architecture, otherwise identical - make host mode the boot default:
+
+* `role-switch-default-mode = "host"` alongside `usb-role-switch`, which is
+  what `dwc2_ovr_init()` reads to force the role at probe. The switch stays
+  registered, so `/sys/class/usb_role/*/role` can still select device mode at
+  runtime; `phy-cv1800-usb2.c` flips the ID override in the PHY's syscon
+  register when it does.
+* `USB_VBUS_EN` (`XGPIOB_5`) and `AUX0` (`XGPIOA_30`) as two chained
+  `regulator-fixed` nodes, reached by `phy-supply` on the PHY. Each carries its
+  own pinmux state, because the pin controller is `strict`, has no
+  `gpio_request_enable`, and the GPIO banks declare no `gpio-ranges` - so
+  requesting a line does not mux its pad.
+
+The GPIO identities come from Milk-V's own pinmux table (in the vendor Duo S
+rootfs) and match the `milkv-usb-duos` userspace switcher, which does the same
+two things through `/dev/mem` and libgpiod. `AUX0` has no documented function;
+it is in that script for the Duo S and not for the Duo 256M, so it is treated
+as board plumbing and named accordingly.
+
+Two known limits: VBUS follows `phy_power_on()` rather than the role, so it
+stays on in device mode, and there is no real OTG detection. Modelling the
+port with `gpio-usb-b-connector` would fix both - `USB_ID` is `XGPIOB_4` and
+`USB_VBUS_DET` is `XGPIOB_6` - but whether either is wired on this board is
+unverified, and a floating ID pin is worse than a fixed default.
 
 ## Updating
 
