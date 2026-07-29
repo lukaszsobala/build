@@ -45,6 +45,14 @@
 # keeps extlinux, apt kernel upgrades and first-boot resize working. The vendor
 # layout has no filesystem on /boot at all, just a raw FIT image.
 #
+# The installer this produces replaces ${version}.img, so it flows through the
+# rest of the pipeline as an ordinary image: fingerprinted, optionally written to
+# CARD_DEVICE, then xz'd and checksummed. It is not a bootable Armbian system and
+# does not need to be - cvi_update runs inside U-Boot and never loads a kernel or
+# mounts a rootfs. All the card has to carry is an MBR, a FAT partition, fip.bin
+# and the payload, so the installer is the payload plus about a megabyte rather
+# than a second copy of anything.
+#
 # ARM vs RISC-V. Only the RISC-V side has been installed on real hardware, and
 # the vendor has never shipped an ARM eMMC image either - their package is the
 # cv1813h_milkv_duos_emmc project and its boot.emmc FIT says arch = "riscv". So
@@ -74,12 +82,16 @@
 #
 # Installation, for the record:
 #
-#   1. format an SD card as FAT32
-#   2. unzip this package into its root
-#   3. insert the card and power on; watch the serial console
-#   4. when it finishes, power off
-#   5. remove the card - otherwise it flashes again on the next boot
-#   6. power on
+#   1. write this image to an SD card, as any other Armbian image
+#   2. insert the card and power on; watch the serial console
+#   3. when it finishes, power off
+#   4. remove the card - otherwise it flashes again on the next boot
+#   5. power on
+#
+# The card is never booted into Linux, so nothing here is a system you can log
+# into. If you want to reuse a card that already holds something else, the two
+# files can equally be copied into the root of any FAT32 partition by hand -
+# that is the vendor's own procedure, and cvi_update cannot tell the difference.
 #
 
 function extension_prepare_config__sophgo_emmc_installer() {
@@ -92,30 +104,19 @@ function extension_prepare_config__sophgo_emmc_installer() {
 			"BOARD=${BOARD} builds a '${SOPHGO_CVI_STORAGE}' bootloader; use a -emmc board"
 	fi
 
-	# The payload is inside a zip already. Letting output_images_compress_and_checksum
-	# put xz or zstd around it would spend minutes to gain nothing. Keep the
-	# checksum if one was asked for, drop the rest.
-	#
-	# This hook runs from do_main_configuration(), which is well before
-	# config-prepare.sh substitutes the "sha,img" default for an empty or "no"
-	# value - so an unset COMPRESS_OUTPUTIMAGE here still means the default is
-	# coming, and testing it as-is would read as "no sha wanted" and throw the
-	# checksum away. Apply the same default first, then narrow it.
-	declare compress="${COMPRESS_OUTPUTIMAGE}"
-	[[ -z "${compress}" || "${compress}" == "no" ]] && compress="sha,img"
-	if [[ "${compress}" == *sha* ]]; then
-		declare -g COMPRESS_OUTPUTIMAGE="sha"
-	else
-		declare -g COMPRESS_OUTPUTIMAGE="none"
-	fi
+	# COMPRESS_OUTPUTIMAGE is deliberately left alone. The installer is an
+	# ordinary .img, so whatever the user asked for is right for it - and xz on
+	# a payload whose free space is zeroes does better than any archive format
+	# would.
 
-	display_alert "${EXTENSION}" "eMMC installer package for ${BOARD}" "info"
+	display_alert "${EXTENSION}" "eMMC installer image for ${BOARD}" "info"
 }
 
 function add_host_dependencies__sophgo_emmc_installer() {
-	# zip for the package itself; mtools for mcopy, which reads fip.bin out of
-	# the image's FAT partition without needing a loop device or root.
-	declare -g EXTRA_BUILD_DEPS="${EXTRA_BUILD_DEPS} zip mtools"
+	# mtools gives us mformat and mcopy, which build and populate the FAT
+	# partition through a file offset - no loop device and no root. sfdisk is
+	# util-linux, already required by the partitioning code.
+	declare -g EXTRA_BUILD_DEPS="${EXTRA_BUILD_DEPS} mtools"
 }
 
 function post_build_image__900_sophgo_emmc_installer() {
@@ -127,21 +128,15 @@ function post_build_image__900_sophgo_emmc_installer() {
 	declare mkcimg="${SRC}/packages/sophgo-sg200x/tools/mkcimg.py"
 	[[ -f "${mkcimg}" ]] || exit_with_error "mkcimg.py not found" "${mkcimg}"
 
-	# Normally emitted by build_image_from_rootfs() right after this hook, but
-	# only when ${version}.img still exists - and it will not, because the
-	# installer replaces it below. Write it here so the package manifest
-	# survives; it describes the system that ends up on the eMMC either way.
-	fingerprint_image "${DESTIMG}/${version}.img.txt" "${version}"
-
-	# The staging directory becomes the FAT root of the installer card, so the
-	# layout here is literally what the user unzips. It lives in DESTIMG because
-	# the payload is image-sized and /tmp is often tmpfs, but deliberately
-	# without the ${version} prefix: output_images_compress_and_checksum and
-	# move_images_to_final_destination both glob "${version}*", and a directory
-	# left behind by a failed build would land in their way.
-	declare stage="${DESTIMG}/emmc-installer-stage"
-	run_host_command_logged rm -rf "${stage}"
-	run_host_command_logged mkdir -p "${stage}"
+	# Work area for the two files that end up in the FAT root, plus the installer
+	# while it is being built. In DESTIMG because the payload is image-sized and
+	# /tmp is often tmpfs, but deliberately without the ${version} prefix:
+	# output_images_compress_and_checksum and move_images_to_final_destination
+	# both glob "${version}*", and anything left behind by a failed build would
+	# land in their way.
+	declare work="${DESTIMG}/emmc-installer-work"
+	run_host_command_logged rm -rf "${work}"
+	run_host_command_logged mkdir -p "${work}"
 
 	# fip.bin is taken out of the image's own FAT partition, where
 	# post_write_uboot_platform__sophgo_sg200x_install_fip put it, rather than
@@ -159,8 +154,8 @@ function post_build_image__900_sophgo_emmc_installer() {
 	[[ "${boot_offset}" =~ ^[0-9]+$ ]] || exit_with_error "could not read partition 1 offset" "${image_file}"
 
 	display_alert "${EXTENSION}" "extracting fip.bin from /boot (partition 1 at ${boot_offset})" "info"
-	run_host_command_logged mcopy -n -i "${image_file}@@${boot_offset}" ::/fip.bin "${stage}/fip.bin"
-	[[ -s "${stage}/fip.bin" ]] || exit_with_error "no fip.bin in the image's boot partition" "${image_file}"
+	run_host_command_logged mcopy -n -i "${image_file}@@${boot_offset}" ::/fip.bin "${work}/fip.bin"
+	[[ -s "${work}/fip.bin" ]] || exit_with_error "no fip.bin in the image's boot partition" "${image_file}"
 
 	# armbian.emmc: the name cvi_update looks for, from imgs.h in
 	# packages/sophgo-sg200x/u-boot/*/include/emmc/. Offset 0 - the image starts
@@ -168,36 +163,57 @@ function post_build_image__900_sophgo_emmc_installer() {
 	display_alert "${EXTENSION}" "wrapping $(( $(stat -c %s "${image_file}") / 1024 / 1024 ))MB image in CIMG" "info"
 	run_host_command_logged python3 "${mkcimg}" \
 		--offset 0 --label ROOTFS \
-		"${image_file}" "${stage}/armbian.emmc"
+		"${image_file}" "${work}/armbian.emmc"
 
-	# Drop the raw .img now that the payload carries it, rather than after the
-	# zip: it saves holding three copies of an image-sized file at once, and
-	# nothing below reads it again. It is not a usable SD image for this board
-	# anyway - booting it would run cvi_update, which finds fip.bin on the card,
-	# rewrites the eMMC bootloader with it, finds no armbian.emmc, and *still*
-	# returns success, so the '||' never reaches distro_bootcmd and the board
-	# does not boot at all. Removing it also means the 'if [[ -f ...img ]]' block
-	# after this hook is skipped, so a stray CARD_DEVICE cannot write it either.
-	display_alert "${EXTENSION}" "discarding the raw .img; the installer is the deliverable" "info"
+	# The target image is now carried inside the payload, so drop it before
+	# building the installer rather than after - that keeps the peak at two
+	# image-sized files instead of three.
+	display_alert "${EXTENSION}" "target image is in the payload; discarding the original" "info"
 	run_host_command_logged rm -f "${image_file}"
 
-	declare zip_file="${DESTIMG}/${version}.emmc-installer.zip"
-	display_alert "${EXTENSION}" "packing $(basename "${zip_file}")" "info"
-	# -j so the files land in the FAT root when unzipped, which is where
-	# cvi_update looks; no path prefix. Compression is left at zip's default -6:
-	# on a 1764MB payload that measured 492MB in 87s against 524MB in 43s at -1,
-	# and 44 seconds inside a build this long is worth 32MB on every download.
-	# The ratio is this good because the image's free space is already zeroes.
-	run_host_command_logged zip -j "${zip_file}" \
-		"${stage}/fip.bin" "${stage}/armbian.emmc"
-	rm -rf "${stage}"
+	# Size the carrier: payload + fip.bin + room for the FAT32 metadata (two
+	# FATs, reserved sectors, root directory) and some slack, rounded up to a
+	# MiB. Being generous costs nothing in the deliverable - the spare space is
+	# zeroes and compresses to almost nothing - and being too tight would fail
+	# only at the final mcopy, after minutes of work.
+	declare -i payload_bytes fip_bytes part_bytes total_bytes
+	payload_bytes="$(stat -c %s "${work}/armbian.emmc")"
+	fip_bytes="$(stat -c %s "${work}/fip.bin")"
+	part_bytes=$(( payload_bytes + fip_bytes + 32 * 1024 * 1024 ))
+	part_bytes=$(( (part_bytes + 1048576 - 1) / 1048576 * 1048576 ))
+	total_bytes=$(( 1048576 + part_bytes ))
 
-	[[ -f "${zip_file}" ]] || exit_with_error "zip did not produce" "${zip_file}"
+	declare installer="${work}/installer.img"
+	display_alert "${EXTENSION}" "building $(( total_bytes / 1024 / 1024 ))MB installer image" "info"
+
+	# One FAT partition starting at 1MiB, type 0x0c and bootable, matching what
+	# sophgo-sg200x_common.inc gives the SD images - the BootROM reads fip.bin
+	# out of the first FAT partition and wants a plain FAT type there.
+	#
+	# mformat/mcopy address the partition through mtools' @@offset syntax, so
+	# the whole thing is built without a loop device and without root. -T is the
+	# partition size in sectors; sfdisk gives the partition the rest of the file,
+	# so the two agree by construction.
+	run_host_command_logged truncate -s "${total_bytes}" "${installer}"
+	run_host_command_logged "printf 'label: dos\nstart=2048, type=c, bootable\n' | sfdisk -q ${installer}"
+	run_host_command_logged mformat -i "${installer}@@1048576" -F -T "$(( part_bytes / 512 ))" ::
+	run_host_command_logged mcopy -i "${installer}@@1048576" "${work}/fip.bin" ::/fip.bin
+	run_host_command_logged mcopy -i "${installer}@@1048576" "${work}/armbian.emmc" ::/armbian.emmc
+
+	# Listed in the log because it is the one cheap end-to-end check that the
+	# card will look the way cvi_update expects.
+	display_alert "${EXTENSION}" "FAT root of the installer:" "info"
+	run_host_command_logged mdir -i "${installer}@@1048576" ::
+
+	run_host_command_logged mv -f "${installer}" "${image_file}"
+	run_host_command_logged rm -rf "${work}"
+
+	[[ -f "${image_file}" ]] || exit_with_error "installer image was not produced" "${image_file}"
 
 	display_alert "${EXTENSION}" \
-		"$(basename "${zip_file}") is $(( $(stat -c %s "${zip_file}") / 1024 / 1024 ))MB" "info"
+		"$(basename "${image_file}") is $(( $(stat -c %s "${image_file}") / 1024 / 1024 ))MB" "info"
 	display_alert "${EXTENSION}" \
-		"unzip to a FAT32 card, boot once, power off, remove the card" "info"
+		"write to a card, boot once, power off, remove the card" "info"
 
 	return 0
 }

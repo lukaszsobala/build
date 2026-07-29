@@ -3,9 +3,9 @@
 # AIC8800D80 Wi-Fi 6 + BT 5, 26-pin + 14-pin GPIO headers.
 #
 # Same silicon and same Linux as milkv-duos-riscv; what differs is where the
-# system lives and, because of that, the bootloader. This board does not build
-# a card image at all - it builds an installer package that writes the eMMC.
-# See extensions/sophgo-sg200x-emmc-installer.sh for the whole mechanism.
+# system lives and, because of that, the bootloader. The image this board builds
+# is not a system you boot - it is an installer that writes one to the eMMC and
+# stops. See extensions/sophgo-sg200x-emmc-installer.sh for the whole mechanism.
 #
 # The microSD slot and the eMMC are mutually exclusive on this board: insert a
 # card and the eMMC drops off the bus. So there is no armbian-install route
@@ -13,7 +13,9 @@
 # on SD can never see each other. Hence a separate board rather than a switch.
 #
 #   ./compile.sh build BOARD=milkv-duos-riscv-emmc BRANCH=edge
-#     -> Armbian_..._Milkv-duos-riscv-emmc_..._minimal.emmc-installer.zip
+#     -> Armbian_..._Milkv-duos-riscv-emmc_..._minimal.img.xz
+#
+# Write that to a card as usual, boot once, power off, remove the card.
 #
 # https://milkv.io/duo-s
 BOARD_NAME="Milk-V Duo S (eMMC)"
