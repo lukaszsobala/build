@@ -52,6 +52,15 @@ function custom_kernel_config__sophgo_aic8800_modules() {
 	kernel_config_modifying_hashes+=("sophgo_aic8800=${AIC8800_REF}")
 	kernel_config_modifying_hashes+=("sophgo_aic8800_patches=$(cat /dev/null "${patches[@]}" | sha256sum | cut -d' ' -f1)")
 
+	# ...and when the firmware path changes, because it is compiled into the modules
+	# (see below). It has to be hashed here explicitly: the kernel_config_set_* helpers
+	# below do add their arguments to this array, but they also run scripts/config, so
+	# they only work in the phase that has a .config - never the phase that computes the
+	# artifact version. Leaving it out means the deb keeps its old name, the cached one
+	# built for the previous path is reused, and the driver spends the boot looking for
+	# firmware in a directory the rootfs no longer has.
+	kernel_config_modifying_hashes+=("sophgo_aic8800_fw_dir=${AIC8800_FW_DIR}")
+
 	# Also called during config dumping / version calculation, with no kernel tree.
 	[[ ! -f .config ]] && return 0
 
@@ -126,6 +135,21 @@ function post_family_tweaks__sophgo_aic8800_firmware() {
 		fw_patch_8800d80_u02.bin fmacfw_8800d80_u02.bin aic_userconfig_8800d80.txt; do
 		[[ -f "${fw_dir}/${fw_file}" ]] ||
 			exit_with_error "AIC8800 firmware missing from the rootfs" "${fw_dir}/${fw_file}"
+	done
+
+	# Blobs in the right place are only half of it: the path is compiled into the
+	# modules, so the kernel package installed here has to agree with the one they were
+	# built for. CONFIG_AIC_FW_PATH stands in for both routes into the modules - it and
+	# the vendor Makefile are driven from the same variable - and reading it back off the
+	# installed kernel is what catches a cached deb from an older AIC8800_FW_DIR. That is
+	# what shipped in the 2026-07-29 riscv64 eMMC image: firmware under aic8800D80,
+	# modules still opening aic8800D80-milkv, retry loop for the whole boot.
+	declare kernel_config
+	for kernel_config in "${SDCARD}"/boot/config-*; do
+		[[ -f "${kernel_config}" ]] || continue
+		grep -qxF "CONFIG_AIC_FW_PATH=\"${AIC8800_FW_DIR}\"" "${kernel_config}" ||
+			exit_with_error "AIC8800 kernel was built for a different firmware path" \
+				"$(grep '^CONFIG_AIC_FW_PATH=' "${kernel_config}") in $(basename "${kernel_config}"), wanted ${AIC8800_FW_DIR}"
 	done
 }
 
