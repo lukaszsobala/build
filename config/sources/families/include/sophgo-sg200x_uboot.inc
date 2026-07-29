@@ -151,8 +151,15 @@ function pre_config_uboot_target__sophgo_sg200x_board_files() {
 	run_host_command_logged mkdir -p "include/cvitek"
 	run_host_command_logged cp -v "${files}/${variant}/include/cvitek.h" "include/cvitek/"
 	run_host_command_logged cp -v "${files}/${variant}/include/cvi_board_memmap.h" "include/"
-	run_host_command_logged cp -v "${files}/${variant}/include/cvipart.h" "include/"
-	run_host_command_logged cp -v "${files}/${variant}/include/imgs.h" "include/"
+
+	# Both dts/ and configs/ are copied wholesale above - the SD and eMMC board
+	# files coexist there harmlessly, and CVIBOARD/BOOTCONFIG pick the pair that
+	# gets built. These two cannot work that way: the names are fixed, U-Boot
+	# #includes them unconditionally, and their contents are per-storage. The
+	# SDK generates them per project for the same reason.
+	declare storage="${SOPHGO_CVI_STORAGE}"
+	run_host_command_logged cp -v "${files}/${variant}/include/${storage}/cvipart.h" "include/"
+	run_host_command_logged cp -v "${files}/${variant}/include/${storage}/imgs.h" "include/"
 
 	# cvitek.mk in the u-boot tree turns these into -D flags, and dts/Makefile
 	# builds arch/$(ARCH)/dts/$(CHIP)_$(CVIBOARD).dtb from them. Exporting here

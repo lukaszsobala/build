@@ -1,0 +1,40 @@
+# Milk-V Duo S (Sophgo SG2000) - ARM mode, eMMC install
+# Cortex-A53 @ 1GHz, 512MB LPDDR3, eMMC, 100M Ethernet, USB-C OTG, USB-A,
+# AIC8800D80 Wi-Fi 6 + BT 5, 26-pin + 14-pin GPIO headers.
+#
+# Same silicon and same Linux as milkv-duos-arm; what differs is where the
+# system lives and, because of that, the bootloader. This board does not build
+# a card image at all - it builds an installer package that writes the eMMC.
+# See extensions/sophgo-sg200x-emmc-installer.sh for the whole mechanism.
+#
+# The microSD slot and the eMMC are mutually exclusive on this board: insert a
+# card and the eMMC drops off the bus. So there is no armbian-install route
+# here, and no way for one image to serve both - a system on eMMC and a system
+# on SD can never see each other. Hence a separate board rather than a switch.
+#
+#   ./compile.sh build BOARD=milkv-duos-arm-emmc BRANCH=edge
+#     -> Armbian_..._Milkv-duos-arm-emmc_..._minimal.emmc-installer.zip
+#
+# https://milkv.io/duo-s
+BOARD_NAME="Milk-V Duo S (eMMC)"
+BOARDFAMILY="sophgo-sg200x-arm64"
+BOARD_MAINTAINER="lukaszsobala"
+KERNEL_TARGET="edge,bleedingedge"
+BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
+# Plain earlycon: on arm64 the DT stdout-path is enough, there is no SBI console.
+SRC_CMDLINE="earlycon console=ttyS0,115200"
+
+# 512MB of RAM does not go far; keep the userspace lean. PACKAGE_LIST_BOARD*
+# is made readonly right after this file is sourced, so it cannot move into the
+# family include even though both variants want the same thing.
+PACKAGE_LIST_BOARD_REMOVE="snapd cloud-init"
+
+# Read as a ${:-sd} default by the family include, which is sourced after this
+# file. It selects the vendor board files - defconfig, DTS, imgs.h, cvipart.h -
+# and through STORAGE_TYPE it is what puts cvi_update in CONFIG_BOOTCOMMAND and
+# makes the eMMC mmc 0. The one line that separates this board from
+# milkv-duos-arm.
+SOPHGO_CVI_STORAGE="emmc"
+
+enable_extension "sophgo-aic8800"
+enable_extension "sophgo-sg200x-emmc-installer"

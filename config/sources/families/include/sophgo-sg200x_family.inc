@@ -50,8 +50,32 @@ declare -g SRC_EXTLINUX="yes"
 declare -g SOPHGO_CVI_CHIP="sg2000"
 declare -g SOPHGO_CVI_CHIP_ARCH="CV181X"
 declare -g SOPHGO_CVI_DDR_CFG="ddr3_1866_x16"
-declare -g SOPHGO_CVI_STORAGE="sd"
 declare -g SOPHGO_CVI_PANEL="MIPI_panel_milkv_8hd"
+
+# Which medium the resulting image is meant to run from: "sd" or "emmc".
+#
+# This is far more than a label. u-boot's cvitek.mk turns STORAGE_TYPE into
+# -DCONFIG_SD_BOOT or -DCONFIG_EMMC_SUPPORT, and cv181x-asic.h keys three things
+# off that:
+#
+#   - CONFIG_BOOTCOMMAND. "sd" boots straight into distro_bootcmd; "emmc" runs
+#     the vendor 'cvi_update' first, which is the eMMC flasher (see
+#     extensions/sophgo-sg200x-emmc-installer.sh).
+#   - which mmc device is which. cv181x_asic_sd.dtsi deletes the cv-emmc@4300000
+#     node outright, so on "sd" the card is mmc 0; cv181x_asic_emmc.dtsi keeps
+#     it, and since it sits before cv-sd@4310000 in cv181x_base.dtsi the eMMC
+#     becomes mmc 0 and the card mmc 1. cvi_update hardcodes that split, and
+#     distro_bootcmd only scans mmc 0.
+#   - the offsets in cvipart.h/imgs.h, which are per-storage files.
+#
+# Set by the board file *before* this include is sourced, so it is a ${:-}
+# default rather than a plain assignment. The -emmc boards are the only ones
+# that set it.
+declare -g SOPHGO_CVI_STORAGE="${SOPHGO_CVI_STORAGE:-sd}"
+case "${SOPHGO_CVI_STORAGE}" in
+	sd | emmc) ;;
+	*) exit_with_error "SOPHGO_CVI_STORAGE must be 'sd' or 'emmc'" "${SOPHGO_CVI_STORAGE}" ;;
+esac
 
 # Kernel: mainline plus the out-of-tree Sophgo patch series.
 #
