@@ -5,7 +5,7 @@
 pending LKML postings for the SG2000/SG2002 (CV181x) SoCs plus a few fixes of
 its own. They are `git am`-format and apply cleanly to **Linux 7.0**.
 
-`0038` is Armbian's, and is described below.
+`0038` and `0039` are Armbian's, and are described below.
 
 ## Why one series for two architectures
 
@@ -20,8 +20,16 @@ its own. They are `git am`-format and apply cleanly to **Linux 7.0**.
 The entire SoC description lives under `arch/riscv`, and the arm64 side reuses
 it with a different interrupt-specifier macro. So the DTS patches that look
 RISC-V-only are in fact needed by both builds, and both families point
-`KERNELPATCHDIR` at this directory. arm64 adds
-`patch/kernel/sophgo-sg200x-arm64` on top for its own board DTS.
+`KERNELPATCHDIR` at this directory.
+
+The reverse also holds, which is why there is no second directory for arm64:
+the patches that touch only `arch/arm64/boot/dts/sophgo/` (`0002` and `0039`)
+are inert on a RISC-V build, since it never descends into `arch/arm64`. Keeping
+them here means one series to rebase when the kernel is bumped, and no way for
+the two architectures' trees to drift apart.
+
+The `edge` branch adds `sophgo-sg200x-dmac-7.0` on top, on both architectures;
+that backport is version-specific rather than arch-specific.
 
 ## 0038 — SOC_PERIPHERAL_IRQ for dual-arch nodes
 
@@ -33,6 +41,20 @@ watchdog and thermal sensor would have landed on GIC SPIs 58 and 16 instead of
 mailbox inside the `soc` node so it inherits the right interrupt parent.
 
 Drop this patch if the numbering is fixed upstream.
+
+## 0039 — arm64 board DTS parity
+
+The initial arm64 Milk-V Duo S device tree (`0002`) only brings up the console,
+SD card and Ethernet. Since the SoC description is shared, every peripheral
+enabled for the RISC-V Duo S is equally available on the Cortex-A53, so `0039`
+brings `arch/arm64/boot/dts/sophgo/sg2000-milkv-duo-s.dts` to parity with its
+RISC-V counterpart: I2C1-4, SPI0-3, UART1-4, PWM0-3, watchdog, eFuse, USB OTG,
+the I2S/internal DAC+ADC sound card and the AIC8800D80 SDIO Wi-Fi slot. It also
+adds the C906L coprocessor reserved-memory region and remoteproc node to
+`sg2000.dtsi`, disabled there and enabled per-board.
+
+It applies on top of `0002` and touches nothing outside `arch/arm64`, so a
+RISC-V build carries it without noticing.
 
 ## Updating
 

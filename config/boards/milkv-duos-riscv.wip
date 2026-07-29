@@ -6,8 +6,11 @@
 # is decided by the FSBL inside fip.bin, so the choice is made by writing this
 # image (RISC-V) or the milkv-duos-arm one, not by a switch on the board.
 #
-# The bootloader is built from source, same as the ARM variant; BOOTCONFIG comes
-# from the family include. See
+# Two board files for one physical board, because BOARD is the build target:
+# each produces a different image. They stay deliberately thin - everything the
+# two variants share (zram tuning, SERIALCON, kernel branches, bootloader) is in
+# the family, which is why only the four lines below differ from milkv-duos-arm.
+# The bootloader is built from source; see
 # config/sources/families/include/sophgo-sg200x_uboot.inc.
 #
 # https://milkv.io/duo-s
@@ -16,29 +19,12 @@ BOARDFAMILY="sophgo-sg200x-riscv64"
 BOARD_MAINTAINER="lukaszsobala"
 KERNEL_TARGET="edge,bleedingedge"
 BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
-SERIALCON="ttyS0"
+# earlycon=sbi: the C906 has no memory-mapped earlycon before the SBI console.
 SRC_CMDLINE="earlycon=sbi console=ttyS0,115200"
 
-# 512MB of RAM does not go far; keep the userspace lean.
+# 512MB of RAM does not go far; keep the userspace lean. PACKAGE_LIST_BOARD*
+# is made readonly right after this file is sourced, so it cannot move into the
+# family include even though both variants want the same thing.
 PACKAGE_LIST_BOARD_REMOVE="snapd cloud-init"
 
 enable_extension "sophgo-aic8800"
-
-function post_family_tweaks__milkv_duos_riscv() {
-	display_alert "Milk-V Duo S" "applying RISC-V board tweaks" "info"
-
-	# zram matters a lot more than usual at 512MB. The stock 50% gives ~240MB of
-	# swap; 100% gives a 512MB device while MEM_LIMIT_PERCENTAGE stays at its 50%
-	# default, so zram may still only occupy 256MB of physical RAM. That is the
-	# overcommit setup the shipped config file points at.
-	#
-	# The variable is ZRAM_PERCENTAGE and it ships commented out, so the pattern
-	# has to tolerate the leading "# " - an earlier version anchored on
-	# ^PERCENTAGE= and silently matched nothing for every build.
-	declare zram_conf="${SDCARD}/etc/default/armbian-zram-config"
-	if [[ -f "${zram_conf}" ]]; then
-		sed -i 's/^#\?\s*ZRAM_PERCENTAGE=.*/ZRAM_PERCENTAGE=100/' "${zram_conf}"
-		grep -q '^ZRAM_PERCENTAGE=100$' "${zram_conf}" ||
-			exit_with_error "failed to set ZRAM_PERCENTAGE" "${zram_conf}"
-	fi
-}
