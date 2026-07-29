@@ -147,7 +147,34 @@ function post_family_tweaks__sophgo_aic8800_modprobe() {
 
 	mkdir -p "${SDCARD}/etc/modules-load.d"
 	cat <<- 'EOF' > "${SDCARD}/etc/modules-load.d/sophgo-aic8800.conf"
+		# aic8800_btlpm is deliberately not here: it only adds an rfkill for
+		# gating the BT subsystem, and the controller is already live once the
+		# bsp has run - Bluetooth works without it.
 		aic8800_bsp
 		aic8800_fdrv
 	EOF
+}
+
+# The chip's Bluetooth side is a plain HCI H4 controller on uart4, already holding
+# the patch aic8800_bsp uploaded over SDIO - so all it needs is an hciattach at the
+# baud rate the patch table announces. These go into the BSP package rather than
+# straight into ${SDCARD} because they are executable assets: dpkg then owns them
+# and an armbian-bsp-cli upgrade carries fixes to installed systems.
+function post_family_tweaks_bsp__sophgo_aic8800_bluetooth() {
+	display_alert "Sophgo AIC8800" "installing Bluetooth attach service" "info"
+
+	run_host_command_logged install -d -m 0755 "${destination}/usr/bin"
+	run_host_command_logged install -m 0755 \
+		"${SRC}/packages/bsp/sophgo-aic8800/aic8800-bluetooth" \
+		"${destination}/usr/bin/aic8800-bluetooth"
+
+	run_host_command_logged install -d -m 0755 "${destination}/usr/lib/systemd/system"
+	run_host_command_logged install -m 0644 \
+		"${SRC}/packages/bsp/sophgo-aic8800/aic8800-bluetooth.service" \
+		"${destination}/usr/lib/systemd/system/aic8800-bluetooth.service"
+}
+
+function post_family_tweaks__sophgo_aic8800_bluetooth_enable() {
+	display_alert "Sophgo AIC8800" "enabling Bluetooth attach service" "info"
+	chroot_sdcard systemctl --no-reload enable aic8800-bluetooth.service
 }

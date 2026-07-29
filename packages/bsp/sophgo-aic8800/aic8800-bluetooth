@@ -1,0 +1,50 @@
+#!/bin/sh
+# Bring up the AIC8800D80's Bluetooth side as an HCI device on the Milk-V Duo S.
+#
+# No firmware download happens here: aic8800_bsp already pushed the BT patch over
+# SDIO while bringing the chip out of reset, so what is left is a plain HCI H4
+# controller sitting on the SoC's uart4. The parameters below are the ones the
+# chip's own patch table announces at boot - "aicbt_patch_table_load bt
+# uart_baud:1500000, uart_flowctrl:1, lpm_enable:0" in dmesg - hence 1.5 Mbaud,
+# RTS/CTS, and nosleep.
+set -e
+
+# Minimal images have no bluez, and there is nothing to attach with. Leave quietly
+# so the unit does not sit in a failed state on a system that never wanted BT.
+command -v hciattach > /dev/null 2>&1 || {
+	echo "aic8800-bluetooth: bluez not installed, nothing to attach with"
+	exit 0
+}
+
+# Resolve the tty from the hardware address. uart4 has no serialN alias in the DT,
+# so its ttySN number falls out of probe order and must not be hardcoded. The
+# device also sits under a simple-bus node, so match on the path rather than
+# assuming /sys/devices/platform/41c0000.serial.
+tty=""
+for dev in /sys/class/tty/ttyS*; do
+	case "$(readlink -f "${dev}/device" 2> /dev/null)" in
+		*41c0000.serial*)
+			tty="${dev##*/}"
+			break
+			;;
+	esac
+done
+[ -n "${tty}" ] || {
+	echo "aic8800-bluetooth: 41c0000.serial (Bluetooth UART) has no tty" >&2
+	exit 1
+}
+
+# If anything else owns the port it will answer the controller's HCI replies and
+# eat them, and the symptom is a controller that looks dead - BD address all
+# zeroes, RX bytes 0 - rather than an error. The Duo S console is uart0, so this
+# should never trigger; check anyway, because it is a miserable thing to diagnose.
+if command -v fuser > /dev/null 2>&1 && fuser "/dev/${tty}" > /dev/null 2>&1; then
+	echo "aic8800-bluetooth: /dev/${tty} is already in use" >&2
+	exit 1
+fi
+
+# Forks; the child holds the HCI device. bluez 5.65 and later power the adapter on
+# by themselves (AutoEnable defaults to true) - on anything older, set
+# AutoEnable=true under [Policy] in /etc/bluetooth/main.conf.
+hciattach -s 1500000 "/dev/${tty}" any 1500000 flow nosleep
+logger -t aic8800-bluetooth "attached HCI on /dev/${tty}"
