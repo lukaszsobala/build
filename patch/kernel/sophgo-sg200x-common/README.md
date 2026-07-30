@@ -5,7 +5,7 @@
 pending LKML postings for the SG2000/SG2002 (CV181x) SoCs plus a few fixes of
 its own. They are `git am`-format and apply cleanly to **Linux 7.0**.
 
-`0038` – `0047` are Armbian's, and are described below.
+`0038` – `0049` are Armbian's, and are described below.
 
 ## Why one series for two architectures
 
@@ -24,8 +24,8 @@ RISC-V-only are in fact needed by both builds, and both families point
 
 The reverse also holds, which is why there is no second directory for arm64:
 the patches that touch only `arch/arm64/boot/dts/sophgo/` (`0002`, `0039`,
-`0041`, `0043`, `0045` and `0047`) are inert on a RISC-V build, since it never
-descends into `arch/arm64`. Keeping them here means one series to rebase
+`0041`, `0043`, `0045`, `0047` and `0049`) are inert on a RISC-V build, since
+it never descends into `arch/arm64`. Keeping them here means one series to rebase
 when the kernel is bumped, and no way for the two architectures' trees to drift
 apart.
 
@@ -186,6 +186,43 @@ is silently accepted.
 Comment only. `uart2` is enabled but its pads are routed to `uart4` by
 `cvi_board_init()`, and `uart4` is the Bluetooth controller, so routing uart2
 takes Bluetooth down. See the pinmux note below.
+
+## 0048, 0049 — a C906L coprocessor overlay
+
+`0044`/`0045` turn the coprocessor off, which is the right default and the wrong
+permanent answer - the core is the whole point of Milk-V's "Arduino on the Duo".
+These put both nodes back in a device tree overlay, so it can be turned on at
+boot without rebuilding a kernel:
+
+```text
+# /boot/armbianEnv.txt
+overlays=c906l
+```
+
+Firmware then goes at `/lib/firmware/cvirtos.elf`. The region is pinned at
+`CVIMMAP_FREERTOS_ADDR` from the vendor's `cvi_board_memmap.h`, which is where a
+vendor-SDK firmware expects to be loaded. That is `0x9fe00000` on both
+architectures - the top 2MiB, since the board DTS overrides the memory node to
+the full 512MiB on both.
+
+Do not take the node *name* in the RISC-V base as the address: `sg2000.dtsi`
+there has `region@8fe00000` holding `reg = <0x9fe00000 0x200000>`, a name/reg
+mismatch that arm64 does not share. `reg` is what reserves the memory, so both
+overlays use `region@9fe00000` and are self-consistent.
+
+Two things in the Makefile hunk are not obvious. The composite
+`sg2000-milkv-duo-s-c906l.dtb` target is never booted; it exists so the build
+applies the overlay with `fdtoverlay`, which checks on every build that the
+overlay still fits its base, and - through the `base-dtb-y` rule in
+`scripts/Makefile.dtbs` - is what makes the base DTB get `-@`. **Without those
+symbols `fdt apply` in U-Boot cannot resolve `&remoteproc`**, and the overlay is
+dead weight. If you ever drop the composite, add `DTC_FLAGS_sg2000-milkv-duo-s
+:= -@` in its place.
+
+The `#address-cells`/`#size-cells` restated in the fragment match the base node
+and are only there to stop dtc warning about the `reg` length: compiling an
+overlay on its own, it cannot see the target's cell counts and assumes `<2>`/
+`<1>`.
 
 ## Which peripherals actually have pins
 
