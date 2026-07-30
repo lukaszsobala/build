@@ -1,23 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Armbian <info@armbian.com>
-Date: Thu, 30 Jul 2026 01:21:00 +0200
-Subject: [PATCH] arm64: dts: sophgo: default the Milk-V Duo S USB port to host
- mode
 
-Same change as the riscv64 Duo S dts, for the arm64 build of the same board:
-host mode at probe with the role switch left in place, and the two Type-A
-power lines driven as chained fixed regulators with their pads muxed to GPIO.
-See the riscv64 patch for the reasoning.
-
-The arm64 sg2000.dtsi reaches the SoC nodes by #including the riscv cv180x and
-cv181x dtsi files, so the porta/portb/pinctrl/usbphy labels are all present,
-but it does not pull in the pinmux bindings header - unlike the riscv
-sg2000.dtsi - so this adds that include.
-
-Signed-off-by: Armbian <info@armbian.com>
 ---
 diff --git a/arch/arm64/boot/dts/sophgo/sg2000-milkv-duo-s.dts b/arch/arm64/boot/dts/sophgo/sg2000-milkv-duo-s.dts
-index 7d35db7..a2ed489 100644
+index 7d35db7..56016da 100644
 --- a/arch/arm64/boot/dts/sophgo/sg2000-milkv-duo-s.dts
 +++ b/arch/arm64/boot/dts/sophgo/sg2000-milkv-duo-s.dts
 @@ -2,6 +2,8 @@
@@ -69,7 +53,7 @@ index 7d35db7..a2ed489 100644
  	sound_card {
  		compatible = "simple-audio-card";
  		simple-audio-card,name = "Milk-V Duo S Built-in Audio";
-@@ -222,11 +257,49 @@
+@@ -222,11 +257,55 @@
  	status = "okay";
  };
  
@@ -83,34 +67,41 @@ index 7d35db7..a2ed489 100644
 +	usb_aux0_cfg: usb-aux0-cfg {
 +		usb-aux0-pins {
 +			pinmux = <PINMUX(PIN_AUX0, 3)>;
++			power-source = <1800>;
 +		};
 +	};
 +
 +	usb_vbus_en_cfg: usb-vbus-en-cfg {
 +		usb-vbus-en-pins {
 +			pinmux = <PINMUX(PIN_USB_VBUS_EN, 3)>;
++			power-source = <1800>;
 +		};
 +	};
 +};
 +
 +/*
-+ * Host by default: role-switch-default-mode is what dwc2_ovr_init() reads to
-+ * force the controller into host mode at probe. The role switch stays
-+ * registered, so /sys/class/usb_role/4340000.usb-role-switch/role still moves
-+ * it to device at runtime, and phy_set_mode() flips the ID override in the
-+ * PHY's syscon register on the way - the register a userspace switcher would
-+ * otherwise poke through /dev/mem.
++ * Host only, not otg with a role switch. dwc2 hangs in probe on this SoC when
++ * usb-role-switch is set: dwc2_drd_init() runs dwc2_ovr_init(), which forces
++ * the session-valid overrides in GOTGCTL and calls dwc2_force_mode(), and the
++ * usb_add_gadget_udc() that follows dwc2_hcd_init() never returns. The probe
++ * is a deferred one, so deferred_probe_initcall() never completes either, and
++ * the boot stops dead before clk_disable_unused() - no output, no panic, the
++ * last line is "hub 1-0:1.0: 1 port detected".
++ *
++ * dr_mode = "host" reaches the same default by a shorter route: dwc2 leaves
++ * gadget_enabled clear, so neither the gadget nor the role switch is set up at
++ * all. The Type-C receptacle gives up its device mode for good, which is the
++ * trade this board wants - it has ethernet for headless work.
 + */
  &usb {
- 	dr_mode = "otg";
-+	usb-role-switch;
-+	role-switch-default-mode = "host";
+-	dr_mode = "otg";
++	dr_mode = "host";
  	status = "okay";
  };
  
 +/*
 + * phy-supply is enabled by phy_power_on(), which dwc2 calls when it brings the
-+ * controller up. That is not role-aware: VBUS stays on in device mode too.
++ * controller up.
 + */
 +&usbphy {
 +	phy-supply = <&reg_usb_vbus>;
@@ -121,4 +112,3 @@ index 7d35db7..a2ed489 100644
  };
 -- 
 2.34.1
-
