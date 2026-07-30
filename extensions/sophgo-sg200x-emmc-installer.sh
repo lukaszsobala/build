@@ -52,15 +52,15 @@
 # file cvi_update copies into the eMMC boot hardware partition. On a later boot
 # with no card, the boot source is the eMMC, the magic does not match, cvi_update
 # returns non-zero and the '||' falls through to distro_bootcmd, which finds
-# /extlinux/extlinux.conf on the eMMC. With a card present the BootROM prefers
-# the card and the whole thing runs again - which is exactly why the install
-# procedure insists on removing it.
+# /boot.scr on the eMMC. With a card present the BootROM prefers the card and
+# the whole thing runs again - which is exactly why the install procedure
+# insists on removing it.
 #
 # The payload is the entire Armbian disk image, MBR and all, written at offset 0.
 # _prgImage() writes each chunk to an absolute byte offset, so nothing forces us
 # into the vendor's BOOT/MISC/ENV/ROOTFS split - and staying out of it is what
-# keeps extlinux, apt kernel upgrades and first-boot resize working. The vendor
-# layout has no filesystem on /boot at all, just a raw FIT image.
+# keeps the boot script, apt kernel upgrades and first-boot resize working. The
+# vendor layout has no filesystem on /boot at all, just a raw FIT image.
 #
 # The installer this produces replaces ${version}.img, so it flows through the
 # rest of the pipeline as an ordinary image: fingerprinted, optionally written to

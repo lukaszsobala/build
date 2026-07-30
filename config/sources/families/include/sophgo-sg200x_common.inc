@@ -20,8 +20,9 @@
 #
 # The vendor U-Boot inside fip.bin then runs distro_bootcmd, whose
 # scan_dev_for_boot_part iterates the partitions marked bootable in the MBR
-# (falling back to partition 1 when none are), and picks up
-# /extlinux/extlinux.conf from the FAT partition.
+# (falling back to partition 1 when none are), and picks up /boot.scr from the
+# FAT partition - scan_dev_for_boot looks for /extlinux/extlinux.conf first and
+# we no longer write one, so it falls through to the script.
 #
 
 # /boot is a FAT partition because the BootROM has to be able to read fip.bin

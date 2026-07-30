@@ -39,9 +39,30 @@ declare -g BOOTPATCHDIR="u-boot-sophgo-sg200x"
 # so is OpenSBI, which has to see u-boot's device tree.
 declare -g ATFSOURCE="none"
 
-# That vendor U-Boot is patched for distroboot, so it finds and parses
-# /extlinux/extlinux.conf on the first bootable partition by itself.
-declare -g SRC_EXTLINUX="yes"
+# That vendor U-Boot is patched for distroboot, which scans the first bootable
+# partition for /extlinux/extlinux.conf and then, failing that, for /boot.scr -
+# scan_dev_for_boot runs scan_dev_for_extlinux before scan_dev_for_scripts. We
+# take the second route, so the images carry the boot.scr and armbianEnv.txt
+# every other Armbian board has. Extlinux would be less machinery, but its
+# config is generated at build time with no runtime knobs: SRC_EXTLINUX and
+# BOOTENV_FILE are mutually exclusive in the framework, and DT overlays could
+# only be fixed at build time through DEFAULT_OVERLAYS rather than chosen by
+# the user. No U-Boot change was needed for the switch - the distroboot patch
+# already exports scriptaddr and BOOTENV.
+# The destination has to be boot.cmd, not boot.scr. The half of the framework
+# that wraps the script in a uImage keys off the destination *name*: both the
+# image build (lib/functions/image/partitioning.sh) and the BSP postinst run
+# mkimage only "if [[ -f /boot/boot.cmd ]]", and both hardcode boot.scr as the
+# output. Name the destination boot.scr and the plain text is copied there
+# under that name, mkimage never runs, and U-Boot rejects it at boot with
+# 'Wrong image format for "source" command'.
+declare -g BOOTSCRIPT="boot-sophgo-sg200x.cmd:boot.cmd"
+
+# Overlays are installed by the kernel package to /boot/dtb/sophgo/overlay/ and
+# named ${OVERLAY_PREFIX}-${name}.dtbo, which is the path boot.cmd builds. The
+# prefix is the SoC rather than the family, because the .dtso sources live in
+# arch/*/boot/dts/sophgo/overlay/ next to the board DTS they patch.
+declare -g OVERLAY_PREFIX="sg2000"
 
 # Identifies the duo-buildroot-sdk-v2 project whose board files we vendored.
 # See packages/sophgo-sg200x/u-boot/README.md. The per-arch half of this set -
