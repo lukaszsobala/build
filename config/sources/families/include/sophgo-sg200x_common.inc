@@ -63,3 +63,23 @@ function post_write_uboot_platform__sophgo_sg200x_install_fip() {
 	display_alert "Sophgo SG200x" "installing built fip.bin -> /boot/fip.bin" "info"
 	run_host_command_logged cp -v "${fip}" "${MOUNT}/boot/fip.bin"
 }
+
+# Nothing gives the SG200x ethernet a MAC address - the device tree has none, the
+# MAC's own filter is empty, and the vendor U-Boot defconfig sets
+# CONFIG_NET_RANDOM_ETHADDR - so the kernel makes one up on every boot and the
+# board's DHCP lease moves with it. Derive one from the chip's efuse serial
+# instead. The helper is shared with the wifi side, which has the same problem for
+# a different reason; extensions/sophgo-aic8800.sh installs the rule for that and
+# relies on the script landing here (both write into the same armbian-bsp-cli).
+function post_family_tweaks_bsp__sophgo_sg200x_stable_mac() {
+	display_alert "Sophgo SG200x" "installing stable MAC address helper" "info"
+
+	run_host_command_logged install -d -m 0755 "${destination}/lib/udev" \
+		"${destination}/etc/udev/rules.d"
+	run_host_command_logged install -m 0755 \
+		"${SRC}/packages/bsp/sophgo-sg200x/lib/udev/sg200x-stable-mac" \
+		"${destination}/lib/udev/sg200x-stable-mac"
+	run_host_command_logged install -m 0644 \
+		"${SRC}/packages/bsp/sophgo-sg200x/etc/udev/rules.d/70-sg200x-stable-mac.rules" \
+		"${destination}/etc/udev/rules.d/70-sg200x-stable-mac.rules"
+}
