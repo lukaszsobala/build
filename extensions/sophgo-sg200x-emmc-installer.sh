@@ -7,17 +7,34 @@
 #
 # Turns the built .img into an eMMC installer package for the Milk-V Duo S.
 #
-# The Duo S cannot install itself. Armbian's usual "boot from SD, run
-# armbian-install, copy to eMMC" route is not available, because on this board
-# the microSD slot and the eMMC are mutually exclusive - inserting a card
-# disconnects the eMMC - so a running system never sees both at once. The eMMC
-# has to be written by something that is not Linux.
+# A blank eMMC has to be written by something that is not Linux, because nothing
+# on the eMMC boots yet and the BootROM is what has to be satisfied first. That
+# something is the vendor bootloader, running off a card.
 #
-# That something is the vendor bootloader. The Sophgo U-Boot carries a
-# 'cvi_update' command (cmd/cvi_update.c) which reads files out of the FAT root
-# of the SD card and writes them to the raw eMMC. It runs before Linux, so the
-# card/eMMC exclusivity does not apply: in U-Boot the card is mmc 1 and the eMMC
-# is mmc 0. See the DTS comments in
+# This used to say the microSD slot and the eMMC are mutually exclusive, and that
+# a running system never sees both. That is wrong, and worth recording because it
+# shaped this whole extension. They are separate controllers - eMMC at 4300000,
+# card at 4310000 - and they coexist: the installer below reads its payload from
+# the card and writes the eMMC in one U-Boot session, and on an eMMC-booted arm64
+# image insertion and removal are both picked up automatically, mmcblk0 coming and
+# going while the eMMC keeps serving root. Every SD0 pad reads back in its native
+# function and the controller reports the card present, so there is no mux and
+# nothing to switch. Do give the card a few seconds: the controller probes
+# asynchronously and the scan runs on a work queue, so lsblk straight after
+# insertion can miss it.
+#
+# The claim came from the vendor bootloader, where it is true by construction:
+# cv181x_asic_sd.dtsi does '/delete-node/ cv-emmc@4300000', so an SD build simply
+# has no eMMC in its device tree. A software choice in their U-Boot, not board
+# wiring, and it does not follow Linux.
+#
+# What that leaves open is an armbian-install style route - boot a card, copy to
+# eMMC from the running system, including fip.bin into the eMMC boot hardware
+# partition via /dev/mmcblkXboot0. Unproven, and not what this extension does.
+#
+# The Sophgo U-Boot carries a 'cvi_update' command (cmd/cvi_update.c) which reads
+# files out of the FAT root of the SD card and writes them to the raw eMMC. In
+# U-Boot the card is mmc 1 and the eMMC is mmc 0; see the DTS comments in
 # packages/sophgo-sg200x/u-boot/*/dts/*_emmc.dts for how that numbering arises.
 #
 # What makes it fire is not a file on the card but how the bootloader was built.

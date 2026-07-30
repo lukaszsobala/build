@@ -7,10 +7,16 @@
 # is not a system you boot - it is an installer that writes one to the eMMC and
 # stops. See extensions/sophgo-sg200x-emmc-installer.sh for the whole mechanism.
 #
-# The microSD slot and the eMMC are mutually exclusive on this board: insert a
-# card and the eMMC drops off the bus. So there is no armbian-install route
-# here, and no way for one image to serve both - a system on eMMC and a system
-# on SD can never see each other. Hence a separate board rather than a switch.
+# A separate board rather than a switch because BOARD is the build target and the
+# bootloader differs: SOPHGO_CVI_STORAGE below is what selects it. The slot and
+# the eMMC are not mutually exclusive - an earlier version of this comment said
+# they were - they are separate controllers, and an eMMC-booted system sees an
+# inserted card. Whether a card-booted system sees the eMMC is still untested.
+# Existing SD boot logs all show 'mmc2: Failed to initialize a non-removable
+# card', but that proves nothing either way: those boots may have been on the Duo
+# S with no eMMC fitted, where it is the correct result. See
+# extensions/sophgo-sg200x-emmc-installer.sh. What forces the installer either
+# way is the BootROM preferring the card, so a blank eMMC cannot bootstrap itself.
 #
 #   ./compile.sh build BOARD=milkv-duos-arm-emmc BRANCH=edge
 #     -> Armbian_..._Milkv-duos-arm-emmc_..._minimal.img.xz
