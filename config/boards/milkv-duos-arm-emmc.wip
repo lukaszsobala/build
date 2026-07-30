@@ -11,12 +11,14 @@
 # bootloader differs: SOPHGO_CVI_STORAGE below is what selects it. The slot and
 # the eMMC are not mutually exclusive - an earlier version of this comment said
 # they were - they are separate controllers, and an eMMC-booted system sees an
-# inserted card. Whether a card-booted system sees the eMMC is still untested.
-# Existing SD boot logs all show 'mmc2: Failed to initialize a non-removable
-# card', but that proves nothing either way: those boots may have been on the Duo
-# S with no eMMC fitted, where it is the correct result. See
-# extensions/sophgo-sg200x-emmc-installer.sh. What forces the installer either
-# way is the BootROM preferring the card, so a blank eMMC cannot bootstrap itself.
+# inserted card, and a card-booted system sees the eMMC as mmcblk2. That last
+# one took a kernel patch: the vendor bootloader only muxes the eMMC pads when
+# it was built for eMMC storage, so after an SD boot they were left unrouted and
+# every log said 'mmc2: Failed to initialize a non-removable card'. Patch 0042/
+# 0043 in patch/kernel/sophgo-sg200x-common declares the group in the DT
+# instead. See extensions/sophgo-sg200x-emmc-installer.sh. What forces the
+# installer either way is the BootROM preferring the card, so a blank eMMC
+# cannot bootstrap itself.
 #
 #   ./compile.sh build BOARD=milkv-duos-arm-emmc BRANCH=edge
 #     -> Armbian_..._Milkv-duos-arm-emmc_..._minimal.img.xz
