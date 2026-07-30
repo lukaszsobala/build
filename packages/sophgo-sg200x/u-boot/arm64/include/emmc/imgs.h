@@ -12,7 +12,7 @@
  * rootfs_ext4.emmc) for its BOOT/MISC/ROOTFS split, Armbian has one. _prgImage()
  * writes each chunk to an absolute byte offset on the raw eMMC, so a single
  * payload starting at offset 0 can carry the whole disk - MBR, FAT /boot and
- * ext4 root exactly as they are on the SD image. That keeps extlinux, apt
+ * ext4 root exactly as they are on the SD image. That keeps the boot script, apt
  * kernel upgrades and first-boot resize working, none of which survive the
  * vendor layout, where /boot is a raw FIT partition with no filesystem.
  */

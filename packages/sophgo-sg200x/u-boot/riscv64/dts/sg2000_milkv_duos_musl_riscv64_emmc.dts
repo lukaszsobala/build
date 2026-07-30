@@ -10,7 +10,7 @@
  * cv-emmc@4300000 precedes cv-sd@4310000 in cv181x_base.dtsi, hence the order.
  * cmd/cvi_update.c hardcodes that split - it fatloads from "mmc 1:1" and writes
  * to "mmc dev 0" - and distro_bootcmd only scans mmc 0, so after installation
- * the same numbering is what finds /extlinux/extlinux.conf on the eMMC.
+ * the same numbering is what finds /boot.scr on the eMMC.
  *
  * Keep in sync with the _sd file; nothing else here is Armbian's.
  */

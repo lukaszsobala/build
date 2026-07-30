@@ -95,8 +95,10 @@ are copies of their `_sd` counterparts, so they inherit it):
 CONFIG_OF_LIBFDT_OVERLAY=y
 ```
 
-This is queenkjuul's `milkv-bootloader` patch 0004, needed for `fdtoverlays` in
-`extlinux.conf`.
+This is queenkjuul's `milkv-bootloader` patch 0004. It arrived for `fdtoverlays`
+in `extlinux.conf` and is still required now that the images boot through
+`boot.scr` instead: it is what backs the `fdt apply` that the boot script runs
+for every entry in `overlays=` in `armbianEnv.txt`.
 
 The RISC-V defconfig additionally turns off the cvitek video stack
 (`CONFIG_DM_VIDEO`, `CONFIG_VIDEO_CVITEK`, `CONFIG_CMD_CVI_VO`). The reasoning

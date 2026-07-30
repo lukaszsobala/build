@@ -6,12 +6,27 @@
 # is decided by the FSBL inside fip.bin, so the choice is made by writing this
 # image (RISC-V) or the milkv-duos-arm one, not by a switch on the board.
 #
-# Two board files for one physical board, because BOARD is the build target:
+# Two board files for one physical board, because BOARD is the build target and
 # each produces a different image. They stay deliberately thin - everything the
-# two variants share (zram tuning, SERIALCON, kernel branches, bootloader) is in
-# the family, which is why only the four lines below differ from milkv-duos-arm.
-# The bootloader is built from source; see
+# two share (zram tuning, SERIALCON, kernel branches, bootloader, boot script)
+# is in the family, which is why only BOARDFAMILY below differs from
+# milkv-duos-arm. The bootloader is built from source; see
 # config/sources/families/include/sophgo-sg200x_uboot.inc.
+#
+# To install to the eMMC instead of running from the card, build this same board
+# with
+#
+#   ./compile.sh build BOARD=milkv-duos-riscv BRANCH=edge SOPHGO_CVI_STORAGE=emmc
+#
+# which produces an installer image rather than a system - see
+# extensions/sophgo-sg200x-emmc-installer.sh. A build switch rather than a board
+# of its own, because the two differ only in how the bootloader is configured.
+#
+# There is deliberately no SRC_CMDLINE. It is read only on the extlinux path and
+# when the boot script is a .template, and this family uses neither: console,
+# earlycon, verbosity and root device all come from /boot/armbianEnv.txt, which
+# the family's BOOTENV_FILE seeds. Setting it here would look like it worked and
+# do nothing.
 #
 # https://milkv.io/duo-s
 BOARD_NAME="Milk-V Duo S"
@@ -19,8 +34,6 @@ BOARDFAMILY="sophgo-sg200x-riscv64"
 BOARD_MAINTAINER="lukaszsobala"
 KERNEL_TARGET="edge,bleedingedge"
 BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
-# earlycon=sbi: the C906 has no memory-mapped earlycon before the SBI console.
-SRC_CMDLINE="earlycon=sbi console=ttyS0,115200"
 
 # 512MB of RAM does not go far; keep the userspace lean. PACKAGE_LIST_BOARD*
 # is made readonly right after this file is sourced, so it cannot move into the

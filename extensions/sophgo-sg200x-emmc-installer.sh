@@ -32,6 +32,15 @@
 # eMMC from the running system, including fip.bin into the eMMC boot hardware
 # partition via /dev/mmcblkXboot0. Unproven, and not what this extension does.
 #
+# Nor can one image cover both by shipping the eMMC bootloader everywhere, which
+# is the obvious thing to try once you know the two are separate controllers.
+# _storage_update() in cmd/cvi_update.c fatloads fip.bin off the card and writes
+# it into the eMMC boot partition before checking anything, and every Armbian
+# image carries a /fip.bin - so an ordinary card boot would silently reflash the
+# eMMC. It then returns 0 whether or not it found a payload, so the '||' in
+# CONFIG_BOOTCOMMAND never reaches distro_bootcmd and nothing boots at all. That,
+# rather than the mmc renumbering, is why the build still forks in two.
+#
 # The Sophgo U-Boot carries a 'cvi_update' command (cmd/cvi_update.c) which reads
 # files out of the FAT root of the SD card and writes them to the raw eMMC. In
 # U-Boot the card is mmc 1 and the eMMC is mmc 0; see the DTS comments in
@@ -99,7 +108,17 @@
 #
 # Installation, for the record:
 #
-#   1. write this image to an SD card, as any other Armbian image
+#   0. build it - the storage type is the only switch, and it enables this
+#      extension by itself:
+#
+#        ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge \
+#            SOPHGO_CVI_STORAGE=emmc
+#
+#      -> Armbian_..._Milkv-duos-arm_..._7.0.14-emmc-installer_minimal.img.xz.
+#      The suffix comes from this extension; the board name is the same one the
+#      plain SD image uses.
+#
+#   1. write that image to an SD card, as any other Armbian image
 #   2. insert the card and power on; watch the serial console
 #   3. when it finishes, power off
 #   4. remove the card - otherwise it flashes again on the next boot
@@ -112,14 +131,22 @@
 #
 
 function extension_prepare_config__sophgo_emmc_installer() {
-	# Enabled by the -emmc board files, which are also the only thing that sets
-	# SOPHGO_CVI_STORAGE. Enabling it by hand on an SD board would produce a
-	# package whose fip.bin never runs cvi_update, so it would sit there doing
-	# nothing; say so rather than shipping it.
+	# Normally enabled by the family include, which turns SOPHGO_CVI_STORAGE=emmc
+	# into exactly this. Reachable by hand through ENABLE_EXTENSIONS, and that is
+	# what the check is for: with an SD bootloader the fip.bin never runs
+	# cvi_update, so the installer would sit there doing nothing. Say so rather
+	# than shipping it.
 	if [[ "${SOPHGO_CVI_STORAGE}" != "emmc" ]]; then
 		exit_with_error "${EXTENSION} needs SOPHGO_CVI_STORAGE=emmc" \
-			"BOARD=${BOARD} builds a '${SOPHGO_CVI_STORAGE}' bootloader; use a -emmc board"
+			"BOARD=${BOARD} builds a '${SOPHGO_CVI_STORAGE}' bootloader; pass SOPHGO_CVI_STORAGE=emmc, which enables this extension by itself"
 	fi
+
+	# The board name no longer says which of the two this is - that was the point
+	# of dropping the -emmc board files - so the suffix has to. Without it an
+	# installer and a system differ only in content and are trivially mixed up
+	# once they are both sitting in output/images. This array is initialized
+	# before this hook runs and consolidated after it, so here is the place.
+	EXTRA_IMAGE_SUFFIXES+=("-emmc-installer")
 
 	# COMPRESS_OUTPUTIMAGE is deliberately left alone. The installer is an
 	# ordinary .img, so whatever the user asked for is right for it - and xz on

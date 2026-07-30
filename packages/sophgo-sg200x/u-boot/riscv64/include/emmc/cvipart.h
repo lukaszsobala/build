@@ -17,12 +17,12 @@
  * None of it is read on an Armbian boot. These values reach U-Boot as
  * environment variables and are consumed only by the vendor fallbacks -
  * emmcboot, norboot, showlogo - which the distroboot patch puts after
- * distro_bootcmd, and which never run because extlinux.conf is found first.
+ * distro_bootcmd, and which never run because /boot.scr is found first.
  * Armbian does not use this partitioning at all: it writes a complete MBR disk
  * image to the eMMC starting at offset 0, so /boot is FAT partition 1 and root
  * is ext4 partition 2. ROOTFS_DEV reflects that real layout rather than the
  * vendor's fourth partition, on the principle that a value which is wrong is
- * worse than one that is merely unused; root= comes from extlinux.conf as a
+ * worse than one that is merely unused; root= comes from armbianEnv.txt as a
  * UUID either way.
  */
 

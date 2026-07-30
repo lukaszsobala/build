@@ -89,12 +89,32 @@ declare -g SOPHGO_CVI_PANEL="MIPI_panel_milkv_8hd"
 #     distro_bootcmd only scans mmc 0.
 #   - the offsets in cvipart.h/imgs.h, which are per-storage files.
 #
-# Set by the board file *before* this include is sourced, so it is a ${:-}
-# default rather than a plain assignment. The -emmc boards are the only ones
-# that set it.
+# It is a build-time switch on an ordinary board rather than a board of its own:
+#
+#   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge SOPHGO_CVI_STORAGE=emmc
+#
+# There used to be a milkv-duos-arm-emmc and a milkv-duos-riscv-emmc whose only
+# real content was this one line, which made four board files for two physical
+# boards. apply_cmdline_params_to_env() runs long before the config phase, so a
+# command-line assignment is in scope here; hence ${:-} rather than a plain
+# assignment.
+#
+# One image cannot serve both, which is why this still forks the build. An
+# eMMC-built bootloader runs cvi_update on every SD boot, and _storage_update()
+# in cmd/cvi_update.c fatloads fip.bin off the card and writes it into the eMMC
+# boot partition without asking - every Armbian image has a /fip.bin, so a plain
+# card boot would silently reflash the eMMC and then return 0, which also means
+# the '||' never reaches distro_bootcmd. The mmc renumbering above is the
+# smaller half of the problem.
 declare -g SOPHGO_CVI_STORAGE="${SOPHGO_CVI_STORAGE:-sd}"
 case "${SOPHGO_CVI_STORAGE}" in
-	sd | emmc) ;;
+	sd) ;;
+	# Enabled here rather than from a board file so that the storage type is the
+	# only knob. Extensions cannot do this the other way round: the extension
+	# manager initializes after this include is sourced, so an extension hook
+	# could not set SOPHGO_CVI_STORAGE in time - while enable_extension() at this
+	# point is exactly what board files do.
+	emmc) enable_extension "sophgo-sg200x-emmc-installer" ;;
 	*) exit_with_error "SOPHGO_CVI_STORAGE must be 'sd' or 'emmc'" "${SOPHGO_CVI_STORAGE}" ;;
 esac
 
