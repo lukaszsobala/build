@@ -1,11 +1,17 @@
 # Sophgo SG200x kernel patches (shared by ARM and RISC-V)
 
-`0001` – `0037` are taken verbatim from
+`0002` – `0037` are taken verbatim from
 [queenkjuul/milkv-duo-ubuntu][qkj] (`milkv-linux/patches/`), which collects the
 pending LKML postings for the SG2000/SG2002 (CV181x) SoCs plus a few fixes of
-its own. They are `git am`-format and apply cleanly to **Linux 7.0**.
+its own. They are `git am`-format and apply cleanly to **Linux 7.0 and 7.2**.
 
 `0038` – `0049` are Armbian's, and are described below.
+
+The series is applied on both branches, and the gaps in it are patches that only
+one of them wants: `0001` and `0003` are in `sophgo-sg200x-bindings-7.0` and
+`0024`, `0025` in `sophgo-sg200x-dmac-7.0`, both of which the family adds to
+`KERNELPATCHDIR` for `edge` alone. Each is upstream by the version
+`bleedingedge` is on, and re-applying an applied patch fails the build.
 
 ## Why one series for two architectures
 
@@ -29,8 +35,8 @@ it never descends into `arch/arm64`. Keeping them here means one series to rebas
 when the kernel is bumped, and no way for the two architectures' trees to drift
 apart.
 
-The `edge` branch adds `sophgo-sg200x-dmac-7.0` on top, on both architectures;
-that backport is version-specific rather than arch-specific.
+The two `-7.0` directories above are added on top on both architectures, for the
+same reason in reverse: they are version-specific rather than arch-specific.
 
 ## 0038 — SOC_PERIPHERAL_IRQ for dual-arch nodes
 

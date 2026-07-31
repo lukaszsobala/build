@@ -156,12 +156,26 @@ case "${BRANCH}" in
 	edge)
 		declare -g KERNEL_MAJOR_MINOR="7.0"
 		declare -g LINUXCONFIG="linux-${LINUXFAMILY}-edge"
-		# CV1800B DMA support is not upstream until 7.1; backport it here.
-		declare -g KERNELPATCHDIR="sophgo-sg200x-common sophgo-sg200x-dmac-7.0"
+		# CV1800B DMA support is not upstream until 7.1, and the SG2000 DT
+		# bindings not until 7.2; both are carried here for 7.0 only.
+		declare -g KERNELPATCHDIR="sophgo-sg200x-common sophgo-sg200x-dmac-7.0 sophgo-sg200x-bindings-7.0"
 		;;
 
+	# Bleeding edge follows the current release candidate, so it moves; that is
+	# the point of the branch. The tag has to be pinned here rather than left to
+	# the framework, because the framework only knows one rc at a time:
+	# config/sources/mainline-kernel.conf.sh names whichever rc it was last
+	# bumped to (7.1-rc7 in this tree), and for anything else its 900_defaults
+	# hook falls back to branch:linux-7.2.y - a stable branch that does not exist
+	# until 7.2 is released, so the fetch would simply fail. Setting KERNELBRANCH
+	# here wins outright: common.conf only calls the mainline_kernel_decide_version
+	# hooks when it is empty.
+	#
+	# Bump the tag by hand as rcs land. Once 7.2 is out, drop the pin entirely and
+	# the stable branch takes over on its own.
 	bleedingedge)
-		declare -g KERNEL_MAJOR_MINOR="7.1"
+		declare -g KERNEL_MAJOR_MINOR="7.2"
+		declare -g KERNELBRANCH="tag:v7.2-rc5"
 		declare -g LINUXCONFIG="linux-${LINUXFAMILY}-bleedingedge"
 		declare -g KERNELPATCHDIR="sophgo-sg200x-common"
 		;;
