@@ -73,14 +73,17 @@ declare -g SOPHGO_OPENSBI_REF="${SOPHGO_OPENSBI_REF:-commit:6766e9cc96df51cde915
 # timing is built to match; this is a different bootloader binary, not a knob
 # Linux can turn. Replaces queenkjuul's fsbl patch 0002, which hardcoded it.
 #
-# Pass it to the build:
-#     ./compile.sh build BOARD=milkv-duos-riscv BRANCH=edge SOPHGO_CPU_OVERDRIVE=yes
+# Default is "yes". 1GHz is the speed the SG2000 is sold at and the speed both
+# the Milk-V and the vendor SDK images run at, so the 850MHz setting is the
+# surprising one, not this. Drop back to it with
+#
+#     ./compile.sh build BOARD=milkv-duos-riscv BRANCH=edge SOPHGO_CPU_OVERDRIVE=no
 #
 # It is listed in artifact-uboot.sh's vars_to_hash, so the two settings produce
 # different u-boot artifact versions and both can sit in the cache at once.
 # Without that it would be silently ignored on any build that had a cached
 # artifact, which is every build after the first.
-declare -g SOPHGO_CPU_OVERDRIVE="${SOPHGO_CPU_OVERDRIVE:-no}"
+declare -g SOPHGO_CPU_OVERDRIVE="${SOPHGO_CPU_OVERDRIVE:-yes}"
 
 # Where the vendored cvitek board files live.
 declare -g SOPHGO_CVI_FILES_DIR="${SRC}/packages/sophgo-sg200x/u-boot"

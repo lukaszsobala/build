@@ -54,7 +54,7 @@ Of that patch series, the parts Armbian still needs live in their proper places:
 | Was | Now |
 | --- | --- |
 | 0001 u-boot distroboot | `patch/u-boot/u-boot-sophgo-sg200x/0001-…` |
-| 0002 fsbl OD_CLK_SEL | `SOPHGO_CPU_OVERDRIVE=yes` → `OD_CLK_SEL=y` |
+| 0002 fsbl OD_CLK_SEL | `SOPHGO_CPU_OVERDRIVE` (default `yes`) → `OD_CLK_SEL=y` |
 | 0003 opensbi `fence.tso` | `patch/atf/opensbi-sophgo-sg200x/0001-…` |
 | 0004 u-boot `of_libfdt_overlay` | `CONFIG_OF_LIBFDT_OVERLAY=y` in both defconfigs |
 | 0005 root partition `mmcblk0p3` | dropped — only affects the vendor `sdboot` fallback, which Armbian does not install |
