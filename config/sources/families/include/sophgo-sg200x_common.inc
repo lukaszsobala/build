@@ -30,6 +30,22 @@
 declare -g BOOTFS_TYPE="fat"
 declare -g BOOTSIZE="128"
 
+# The USB CDC-NCM gadget has to hand an address to the computer at the other end
+# of the cable, or that computer times out into a 169.254.x address and the board
+# is unreachable to anyone who has not been told to configure it by hand.
+# systemd-networkd needs nothing for that - DHCPServer= is built in - but
+# NetworkManager's ipv4.method=shared runs a dnsmasq to do the same job, and
+# Armbian installs with --no-install-recommends throughout, so the Recommends
+# that would normally bring it along does not fire.
+#
+# Read here rather than in a hook because this is a package list: the framework
+# computes NETWORKING_STACK before sourcing the family and freezes both this and
+# PACKAGE_LIST_FAMILY afterwards, so a family file is the one place that can see
+# one and still change the other.
+if [[ "${NETWORKING_STACK}" == "network-manager" ]]; then
+	declare -g PACKAGE_LIST_FAMILY="${PACKAGE_LIST_FAMILY} dnsmasq-base"
+fi
+
 function pre_prepare_partitions__sophgo_sg200x_msdos_layout() {
 	# The BootROM parses an MBR; riscv64.conf and arm64.conf both default to GPT.
 	declare -g IMAGE_PARTITION_TABLE="msdos"
@@ -104,4 +120,43 @@ function post_family_tweaks_bsp__sophgo_sg200x_stable_mac() {
 	run_host_command_logged install -m 0644 \
 		"${SRC}/packages/bsp/sophgo-sg200x/etc/udev/rules.d/70-sg200x-stable-mac.rules" \
 		"${destination}/etc/udev/rules.d/70-sg200x-stable-mac.rules"
+}
+
+# The userspace half of the "usb-device" device tree overlay: the overlay turns
+# the USB controller around, and this describes what kind of device it should
+# then pretend to be. See the script for why the two are independent and why this
+# is installed on every image regardless of which overlays are enabled - in
+# short, it does nothing at all until a UDC exists, and one only exists with the
+# overlay on.
+#
+# Both network stacks' configuration goes in, because which one is running is not
+# known here: NETWORKING_STACK defaults to systemd-networkd for BUILD_MINIMAL and
+# NetworkManager otherwise, and either is a legitimate way to build this board.
+# Neither stack reads the other's files.
+function post_family_tweaks_bsp__sophgo_sg200x_usb_gadget() {
+	display_alert "Sophgo SG200x" "installing USB CDC-NCM gadget service" "info"
+
+	run_host_command_logged install -d -m 0755 "${destination}/usr/sbin" \
+		"${destination}/usr/lib/systemd/system" \
+		"${destination}/etc/systemd/network"
+	run_host_command_logged install -m 0755 \
+		"${SRC}/packages/bsp/sophgo-sg200x/usr/sbin/sg200x-usb-gadget" \
+		"${destination}/usr/sbin/sg200x-usb-gadget"
+	run_host_command_logged install -m 0644 \
+		"${SRC}/packages/bsp/sophgo-sg200x/usr/lib/systemd/system/sg200x-usb-gadget.service" \
+		"${destination}/usr/lib/systemd/system/sg200x-usb-gadget.service"
+	run_host_command_logged install -m 0644 \
+		"${SRC}/packages/bsp/sophgo-sg200x/etc/systemd/network/70-sg200x-usb0.network" \
+		"${destination}/etc/systemd/network/70-sg200x-usb0.network"
+
+	# 0600, and NetworkManager will not so much as read it otherwise.
+	run_host_command_logged install -d -m 0755 "${destination}/etc/NetworkManager/system-connections"
+	run_host_command_logged install -m 0600 \
+		"${SRC}/packages/bsp/sophgo-sg200x/etc/NetworkManager/system-connections/sg200x-usb0.nmconnection" \
+		"${destination}/etc/NetworkManager/system-connections/sg200x-usb0.nmconnection"
+}
+
+function post_family_tweaks__sophgo_sg200x_usb_gadget_enable() {
+	display_alert "Sophgo SG200x" "enabling USB CDC-NCM gadget service" "info"
+	chroot_sdcard systemctl --no-reload enable sg200x-usb-gadget.service
 }

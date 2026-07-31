@@ -28,6 +28,7 @@
 # card.
 #
 # Usage: sg200x-stable-mac <interface> <role> [expected-mac-prefix]
+#        sg200x-stable-mac --print <role>
 #
 #   role    An arbitrary but stable tag, mixed into the hash so the interfaces do
 #           not all end up with one address. Deliberately not the interface name:
@@ -36,6 +37,11 @@
 #           this. Used for the wifi side, where the address to replace is the
 #           driver's known default and anything else means the chip did have a
 #           real MAC in efuse and we should keep our hands off it.
+#
+# --print derives an address and writes it to stdout instead of assigning it to
+# anything. The USB gadget needs its two addresses - its own and the one it hands
+# the computer at the other end of the cable - written into configfs before the
+# gadget is bound, at which point there is no interface yet to assign them to.
 #
 # To pin a particular address by hand instead, edit or delete the rule in
 # /etc/udev/rules.d that calls this - a .link file with MACAddress= will not do
@@ -51,42 +57,56 @@ export PATH
 set -e
 
 me="${0##*/}"
-iface="${1}"
-role="${2}"
-want_prefix="${3}"
 
-[ -n "${iface}" ] && [ -n "${role}" ] || {
+usage() {
 	echo "usage: ${me} <interface> <role> [expected-mac-prefix]" >&2
+	echo "       ${me} --print <role>" >&2
 	exit 1
 }
 
-sysfs="/sys/class/net/${iface}"
-[ -d "${sysfs}" ] || {
-	# udev substitutes %k, the kernel name, when the rule matches, but RUN
-	# programs execute at the end of event processing - after
-	# 80-net-setup-link.rules could in principle have renamed the interface.
-	# Neither of these devices gets renamed in practice, precisely because
-	# net_id produces no ID_NET_NAME_* for them, but say so plainly if it ever
-	# starts happening rather than failing off in the weeds.
-	echo "${me}: no interface ${iface} (renamed since the udev rule matched?)" >&2
-	exit 1
-}
+if [ "${1}" = "--print" ]; then
+	print_only="yes"
+	role="${2}"
+	[ -n "${role}" ] || usage
+else
+	print_only="no"
+	iface="${1}"
+	role="${2}"
+	want_prefix="${3}"
+	[ -n "${iface}" ] && [ -n "${role}" ] || usage
+fi
 
-current=$(cat "${sysfs}/address" 2> /dev/null || true)
+# Everything up to the derivation is about the interface being changed, and
+# --print has none - it is asked for an address, not asked to install one.
+if [ "${print_only}" = "no" ]; then
+	sysfs="/sys/class/net/${iface}"
+	[ -d "${sysfs}" ] || {
+		# udev substitutes %k, the kernel name, when the rule matches, but RUN
+		# programs execute at the end of event processing - after
+		# 80-net-setup-link.rules could in principle have renamed the interface.
+		# Neither of these devices gets renamed in practice, precisely because
+		# net_id produces no ID_NET_NAME_* for them, but say so plainly if it ever
+		# starts happening rather than failing off in the weeds.
+		echo "${me}: no interface ${iface} (renamed since the udev rule matched?)" >&2
+		exit 1
+	}
 
-if [ -n "${want_prefix}" ]; then
-	case "${current}" in
-		"${want_prefix}"*) ;;
-		*)
-			echo "${me}: ${iface} is ${current}, not ${want_prefix}* - leaving it alone"
-			exit 0
-			;;
-	esac
-elif [ "$(cat "${sysfs}/addr_assign_type" 2> /dev/null || true)" = "0" ]; then
-	# NET_ADDR_PERM: the driver says this address is burned into the hardware,
-	# so it is not ours to overwrite.
-	echo "${me}: ${iface} has a permanent address (${current}) - leaving it alone"
-	exit 0
+	current=$(cat "${sysfs}/address" 2> /dev/null || true)
+
+	if [ -n "${want_prefix}" ]; then
+		case "${current}" in
+			"${want_prefix}"*) ;;
+			*)
+				echo "${me}: ${iface} is ${current}, not ${want_prefix}* - leaving it alone"
+				exit 0
+				;;
+		esac
+	elif [ "$(cat "${sysfs}/addr_assign_type" 2> /dev/null || true)" = "0" ]; then
+		# NET_ADDR_PERM: the driver says this address is burned into the hardware,
+		# so it is not ours to overwrite.
+		echo "${me}: ${iface} has a permanent address (${current}) - leaving it alone"
+		exit 0
+	fi
 fi
 
 # FTSN1..FTSN4, the chip's Final Test Serial Number. nvmem offset 0 is the efuse
@@ -121,7 +141,7 @@ else
 	seed=$(cat /etc/machine-id 2> /dev/null || true)
 	seed_kind="machine-id"
 	[ -n "${seed}" ] || {
-		echo "${me}: no chip serial in efuse and no machine-id - cannot derive a MAC for ${iface}" >&2
+		echo "${me}: no chip serial in efuse and no machine-id - cannot derive a MAC for ${iface:-${role}}" >&2
 		exit 1
 	}
 fi
@@ -143,6 +163,11 @@ b6=$(printf '%s' "${hash}" | cut -c11-12)
 # it clear of every real vendor OUI.
 mac=$(printf '%02x:%s:%s:%s:%s:%s' "$(((0x${b1} & 0xfe) | 0x02))" \
 	"${b2}" "${b3}" "${b4}" "${b5}" "${b6}")
+
+if [ "${print_only}" = "yes" ]; then
+	printf '%s\n' "${mac}"
+	exit 0
+fi
 
 # The interface is still down at this point in the udev event, which
 # eth_mac_addr() requires - it returns -EBUSY on a running device. NetworkManager
