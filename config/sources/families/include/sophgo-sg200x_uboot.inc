@@ -29,9 +29,15 @@
 # (plat/cv181x/prebuilt/) on ARM, and OpenSBI on RISC-V, which is why only the
 # RISC-V family builds a third component.
 #
-# The FSBL also decides which core runs Linux, through TOC_HEADER_NAME
-# (0xC906B001 for RISC-V, 0xAA640001 for aarch64). Nothing on the board selects
-# it; writing a different image is the switch.
+# The FSBL is built for one core and says which through TOC_HEADER_NAME
+# (0xC906B001 for RISC-V, 0xAA640001 for aarch64); plat/cv181x/platform.c is
+# full of '#ifdef __riscv' besides. So a given fip.bin serves one architecture
+# and not the other.
+#
+# It does not get to choose, though. The slide switch on the board decides which
+# core the BootROM comes up on, and the BootROM then wants a fip.bin whose TOC
+# header matches. Both have to agree: the switch position and which of the two
+# board images was written. A mismatch does not boot at all.
 #
 # Both architectures skip FreeRTOS for the companion C906L core - Linux loads it
 # later through remoteproc anyway, and building it would pull in a 131MiB repo
