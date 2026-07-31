@@ -81,15 +81,20 @@ function artifact_uboot_prepare_version() {
 	declare -a extension_hooks_to_hash=(
 		"post_uboot_custom_postprocess" "fetch_custom_uboot" "build_custom_uboot"
 		"pre_config_uboot_target" "post_config_uboot_target" "pre_package_uboot_image"
+		"check_uboot_produced_binary_file"
 	)
 	declare -a extension_hooks_hashed=("$(dump_extension_method_sources_functions "${extension_hooks_to_hash[@]}")")
 	declare hash_hooks="undetermined"
 	hash_hooks="$(echo "${extension_hooks_hashed[@]}" | sha256sum | cut -d' ' -f1)"
 
 	# Hash the old-timey hooks and regular core functions (atf code, used by u-boot build process)
+	# calculate_hash_for_function_bodies skips functions that don't exist, so family-specific
+	# builders (e.g. K3's compile_k3_bootgen/optee, which are called from a hashed hook but whose
+	# bodies would otherwise not be hashed) can be listed here without affecting other families.
 	declare hash_functions="undetermined"
 	calculate_hash_for_function_bodies "uboot_custom_postprocess" "write_uboot_platform" "write_uboot_platform_mtd" \
-		"setup_write_uboot_platform" "compile_atf"
+		"setup_write_uboot_platform" "compile_atf" \
+		"compile_k3_bootgen" "compile_k3_optee"
 	declare hash_uboot_functions="${hash_functions}"
 
 	# Hash those two together
@@ -105,12 +110,16 @@ function artifact_uboot_prepare_version() {
 		"${BOOTDELAY}" "${UBOOT_DEBUGGING}" "${UBOOT_TARGET_MAP}"        # general for all families
 		"${BOOT_SCENARIO}" "${BOOT_SUPPORT_SPI}" "${BOOT_SOC}"           # rockchip stuff, sorry.
 		"${DDR_BLOB}" "${BL31_BLOB}" "${BL32_BLOB}" "${MINILOADER_BLOB}" # More rockchip stuff, even more sorry.
-		"${ATF_COMPILE}" "${ATFSOURCE}" "${ATFBRANCH}" "${ATFPATCHDIR}"  # arm-trusted-firmware stuff
+		"${ATF_COMPILE}" "${ATFSOURCE}" "${ATFBRANCH}" "${ATFPATCHDIR}" "${ATF_TARGET_MAP}" "${ATF_LOG_LEVEL:-40}" # arm-trusted-firmware stuff
 		"${CRUSTCONFIG}" "${CRUSTBRANCH}" "${CRUSTPATCHDIR}"             # crust stuff
 		"${SOPHGO_CPU_OVERDRIVE}"                                        # sophgo sg200x: picks the OD_CLK_SEL PLL table in the FSBL
 		"${IMAGE_PARTITION_TABLE}" "${BOOT_FDT_FILE}" "${SERIALCON}"     # image and kernel related, to be used as reference/docs
 		"${SRC_EXTLINUX}" "${SRC_CMDLINE}"                               # image and kernel related, to be used as reference/docs
 	)
+	# Opt-in cache-bust for a board shipping a prebuilt/external u-boot blob: bump
+	# UBOOT_HASH_EXTRA when the blob changes to force a repackage. Appended ONLY when
+	# set, so boards that don't use it keep their exact previous version (no churn).
+	[[ -n "${UBOOT_HASH_EXTRA:-}" ]] && vars_to_hash+=("${UBOOT_HASH_EXTRA}")
 	declare hash_variables="undetermined" # will be set by calculate_hash_for_variables(), which normalizes the input
 	calculate_hash_for_variables "${vars_to_hash[@]}"
 	declare vars_config_hash="${hash_variables}"
@@ -122,7 +131,10 @@ function artifact_uboot_prepare_version() {
 	declare bash_hash="${hash_files}"
 	declare bash_hash_short="${bash_hash:0:${short_hash_size}}"
 
-	# outer scope
+	# outer scope. UBOOT_HASH_EXTRA (in vars_to_hash above) folds into -V, so a board
+	# that ships a prebuilt or externally-fetched u-boot blob just bumps that string
+	# to force a repackage — no filesystem read here (the blob may not exist yet at
+	# matrix-prep, and may not live in this repo at all).
 	artifact_version="${GIT_INFO_UBOOT[MAKEFILE_VERSION]}-S${short_sha1}-P${uboot_patches_hash_short}-H${hash_hooks_and_functions_short}-V${var_config_hash_short}-B${bash_hash_short}"
 
 	declare -a reasons=(
