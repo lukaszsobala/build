@@ -8,12 +8,12 @@
 #
 # Everything the Sophgo SG200x ARM and RISC-V families have in common.
 #
-# The two families differ only in which core of the SG2000 runs Linux, and that
-# is decided by the FSBL inside fip.bin - not by anything in the kernel, the
-# bootloader sources or the board wiring. So almost every knob here is identical
-# on both sides, and keeping two copies of it only invites drift: the U-Boot and
-# FSBL commit pins in particular have to move together or the two images stop
-# being the same board.
+# The two families differ only in which core of the SG2000 runs Linux, and
+# nothing in the kernel or the bootloader sources decides that. The board does,
+# through a slide switch, and the image has to agree with it - see the board
+# files. So almost every knob here is identical on both sides, and keeping two
+# copies of it only invites drift: the U-Boot and FSBL commit pins in particular
+# have to move together or the two images stop being the same board.
 #
 # Sourced near the top of both family files, before sophgo-sg200x_uboot.inc,
 # which consumes SOPHGO_CVI_* to build BOOTCONFIG. What stays in the family
@@ -79,9 +79,11 @@ declare -g SOPHGO_CVI_PANEL="MIPI_panel_milkv_8hd"
 # -DCONFIG_SD_BOOT or -DCONFIG_EMMC_SUPPORT, and cv181x-asic.h keys three things
 # off that:
 #
-#   - CONFIG_BOOTCOMMAND. "sd" boots straight into distro_bootcmd; "emmc" runs
-#     the vendor 'cvi_update' first, which is the eMMC flasher (see
-#     extensions/sophgo-sg200x-emmc-installer.sh).
+#   - CONFIG_BOOTCOMMAND. "sd" gets "run distro_bootcmd || run sdboot"; "emmc"
+#     gets "cvi_update || run distro_bootcmd || ...", where cvi_update is the
+#     vendor eMMC flasher. On an eMMC boot the flasher finds no SD magic and
+#     returns non-zero, so the '||' falls through and the image boots the
+#     ordinary distroboot way.
 #   - which mmc device is which. cv181x_asic_sd.dtsi deletes the cv-emmc@4300000
 #     node outright, so on "sd" the card is mmc 0; cv181x_asic_emmc.dtsi keeps
 #     it, and since it sits before cv-sd@4310000 in cv181x_base.dtsi the eMMC
@@ -92,6 +94,20 @@ declare -g SOPHGO_CVI_PANEL="MIPI_panel_milkv_8hd"
 # It is a build-time switch on an ordinary board rather than a board of its own:
 #
 #   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge SOPHGO_CVI_STORAGE=emmc
+#
+# and what comes out is an ordinary bootable Armbian image, just with the eMMC
+# bootloader in it. Getting it onto the eMMC is two writes rather than one,
+# because no disk image can describe the whole eMMC: the BootROM reads fip.bin
+# raw out of hardware boot partition 1 (/dev/mmcblkXboot0), a separate LUN that
+# is not part of the addressable device an .img covers. So dd alone leaves the
+# system in place and the board dead. /usr/sbin/sophgo-emmc-install, shipped in
+# every image of this family, does both halves from a running SD system.
+#
+# For a board with no bootable card to run that from, the same image can be
+# turned into a self-flashing installer card instead:
+#
+#   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge SOPHGO_CVI_STORAGE=emmc \
+#       ENABLE_EXTENSIONS=sophgo-sg200x-emmc-installer
 #
 # There used to be a milkv-duos-arm-emmc and a milkv-duos-riscv-emmc whose only
 # real content was this one line, which made four board files for two physical
@@ -108,15 +124,24 @@ declare -g SOPHGO_CVI_PANEL="MIPI_panel_milkv_8hd"
 # smaller half of the problem.
 declare -g SOPHGO_CVI_STORAGE="${SOPHGO_CVI_STORAGE:-sd}"
 case "${SOPHGO_CVI_STORAGE}" in
-	sd) ;;
-	# Enabled here rather than from a board file so that the storage type is the
-	# only knob. Extensions cannot do this the other way round: the extension
-	# manager initializes after this include is sourced, so an extension hook
-	# could not set SOPHGO_CVI_STORAGE in time - while enable_extension() at this
-	# point is exactly what board files do.
-	emmc) enable_extension "sophgo-sg200x-emmc-installer" ;;
+	sd | emmc) ;;
 	*) exit_with_error "SOPHGO_CVI_STORAGE must be 'sd' or 'emmc'" "${SOPHGO_CVI_STORAGE}" ;;
 esac
+
+# The board name no longer says which of the two an image is - that was the
+# point of dropping the -emmc board files - so the file name has to, or an SD
+# image and an eMMC one differ only in content and are trivially mixed up once
+# they are both sitting in output/images.
+#
+# It has to be a hook and it has to be this hook: EXTRA_IMAGE_SUFFIXES is
+# declared in main-config.sh well after this include is sourced, and consolidated
+# a few lines after extension_prepare_config runs. The 100_ prefix is what keeps
+# "-emmc" ahead of the installer extension's "-installer" - unprefixed hook
+# functions sort as 500_, so without it the suffixes would come out reversed.
+function extension_prepare_config__100_sophgo_sg200x_storage_suffix() {
+	[[ "${SOPHGO_CVI_STORAGE}" == "emmc" ]] || return 0
+	EXTRA_IMAGE_SUFFIXES+=("-emmc")
+}
 
 # Kernel: mainline plus the out-of-tree Sophgo patch series.
 #

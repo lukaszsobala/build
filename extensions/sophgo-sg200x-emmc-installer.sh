@@ -5,11 +5,27 @@
 # This file is a part of the Armbian Build Framework
 # https://github.com/armbian/build/
 #
-# Turns the built .img into an eMMC installer package for the Milk-V Duo S.
+# Turns the built .img into an eMMC installer card for the Milk-V Duo S.
 #
-# A blank eMMC has to be written by something that is not Linux, because nothing
-# on the eMMC boots yet and the BootROM is what has to be satisfied first. That
-# something is the vendor bootloader, running off a card.
+# Opt-in, and the second-choice route. SOPHGO_CVI_STORAGE=emmc on its own now
+# produces an ordinary bootable image, which /usr/sbin/sophgo-emmc-install
+# writes onto the eMMC from a running SD system - two dd's, one to the user area
+# and one to the hardware boot partition the image cannot reach. That is the
+# path to prefer: what comes out is a system rather than a flasher, so it can be
+# inspected, mounted, and written by any means that can reach a block device.
+#
+# This extension is for when there is no running system to do that from - a
+# board whose card slot is occupied, in use, or whose only Linux is the one
+# being installed. Enable it explicitly:
+#
+#   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge SOPHGO_CVI_STORAGE=emmc \
+#       ENABLE_EXTENSIONS=sophgo-sg200x-emmc-installer
+#
+# It also remains the one path exercised end to end on real hardware.
+#
+# With no Linux to hand, a blank eMMC has to be written by something that is not
+# Linux, because nothing on the eMMC boots yet and the BootROM is what has to be
+# satisfied first. That something is the vendor bootloader, running off a card.
 #
 # This used to say the microSD slot and the eMMC are mutually exclusive, and that
 # a running system never sees both. That is wrong, and worth recording because it
@@ -28,12 +44,15 @@
 # has no eMMC in its device tree. A software choice in their U-Boot, not board
 # wiring, and it does not follow Linux.
 #
-# What that leaves open is an armbian-install style route - boot a card, copy to
-# eMMC from the running system, including fip.bin into the eMMC boot hardware
-# partition via /dev/mmcblkXboot0. Unproven, and not what this extension does.
+# What that opened up is the armbian-install style route - boot a card, write the
+# eMMC from the running system, fip.bin into /dev/mmcblkXboot0 included. That is
+# now packages/bsp/sophgo-sg200x/usr/sbin/sophgo-emmc-install, and it is the
+# default route; the offsets it writes are read off _storage_update() below, so
+# the two agree by construction. Not yet run on hardware.
 #
-# Nor can one image cover both by shipping the eMMC bootloader everywhere, which
-# is the obvious thing to try once you know the two are separate controllers.
+# What it does not open up is one image covering both by shipping the eMMC
+# bootloader everywhere - the obvious thing to try once the two are known to be
+# separate controllers, and still wrong.
 # _storage_update() in cmd/cvi_update.c fatloads fip.bin off the card and writes
 # it into the eMMC boot partition before checking anything, and every Armbian
 # image carries a /fip.bin - so an ordinary card boot would silently reflash the
@@ -108,15 +127,15 @@
 #
 # Installation, for the record:
 #
-#   0. build it - the storage type is the only switch, and it enables this
-#      extension by itself:
+#   0. build it - the eMMC storage type, plus this extension by name:
 #
 #        ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge \
-#            SOPHGO_CVI_STORAGE=emmc
+#            SOPHGO_CVI_STORAGE=emmc \
+#            ENABLE_EXTENSIONS=sophgo-sg200x-emmc-installer
 #
 #      -> Armbian_..._Milkv-duos-arm_..._7.0.14-emmc-installer_minimal.img.xz.
-#      The suffix comes from this extension; the board name is the same one the
-#      plain SD image uses.
+#      "-emmc" comes from the family, "-installer" from here; the board name is
+#      the same one the plain SD image uses.
 #
 #   1. write that image to an SD card, as any other Armbian image
 #   2. insert the card and power on; watch the serial console
@@ -131,22 +150,20 @@
 #
 
 function extension_prepare_config__sophgo_emmc_installer() {
-	# Normally enabled by the family include, which turns SOPHGO_CVI_STORAGE=emmc
-	# into exactly this. Reachable by hand through ENABLE_EXTENSIONS, and that is
-	# what the check is for: with an SD bootloader the fip.bin never runs
-	# cvi_update, so the installer would sit there doing nothing. Say so rather
-	# than shipping it.
+	# Enabled by hand, so the storage type has to be checked rather than assumed:
+	# with an SD bootloader the fip.bin never runs cvi_update, so the installer
+	# would sit there doing nothing. Say so rather than shipping it.
 	if [[ "${SOPHGO_CVI_STORAGE}" != "emmc" ]]; then
 		exit_with_error "${EXTENSION} needs SOPHGO_CVI_STORAGE=emmc" \
-			"BOARD=${BOARD} builds a '${SOPHGO_CVI_STORAGE}' bootloader; pass SOPHGO_CVI_STORAGE=emmc, which enables this extension by itself"
+			"BOARD=${BOARD} builds a '${SOPHGO_CVI_STORAGE}' bootloader; add SOPHGO_CVI_STORAGE=emmc to the command line"
 	fi
 
-	# The board name no longer says which of the two this is - that was the point
-	# of dropping the -emmc board files - so the suffix has to. Without it an
-	# installer and a system differ only in content and are trivially mixed up
-	# once they are both sitting in output/images. This array is initialized
-	# before this hook runs and consolidated after it, so here is the place.
-	EXTRA_IMAGE_SUFFIXES+=("-emmc-installer")
+	# Distinguishes the flasher from the bootable eMMC image it carries, which
+	# the family has already suffixed "-emmc". Unprefixed hook functions sort as
+	# 500_ and the family's is 100_, so the two come out in that order. This
+	# array is initialized before this hook runs and consolidated after it, so
+	# here is the place.
+	EXTRA_IMAGE_SUFFIXES+=("-installer")
 
 	# COMPRESS_OUTPUTIMAGE is deliberately left alone. The installer is an
 	# ordinary .img, so whatever the user asked for is right for it - and xz on

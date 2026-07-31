@@ -63,6 +63,27 @@ function post_write_uboot_platform__sophgo_sg200x_install_fip() {
 
 	display_alert "Sophgo SG200x" "installing built fip.bin -> /boot/fip.bin" "info"
 	run_host_command_logged cp -v "${fip}" "${MOUNT}/boot/fip.bin"
+
+	# Stamp which of the two bootloaders this is, next to the file it describes.
+	# Nothing at boot reads it; sophgo-emmc-install does, to refuse putting an SD
+	# fip.bin into the eMMC boot partition - that one has cv-emmc@4300000 deleted
+	# from its device tree, so it comes up with no eMMC and nothing to boot. The
+	# two cannot be told apart from the file: U-Boot is LZMA-compressed inside
+	# fip.bin, so not even the CONFIG_BOOTCOMMAND string survives to grep for.
+	display_alert "Sophgo SG200x" "stamping /boot/sophgo-storage.txt as '${SOPHGO_CVI_STORAGE}'" "info"
+	echo "${SOPHGO_CVI_STORAGE}" > "${MOUNT}/boot/sophgo-storage.txt"
+}
+
+# Shipped on both storage variants, because it is only ever useful from the one
+# that is running: you boot a card and install to the eMMC from there. Harmless
+# on an eMMC-booted system, where it refuses to touch its own root device.
+function post_family_tweaks_bsp__sophgo_sg200x_emmc_install_tool() {
+	display_alert "Sophgo SG200x" "installing eMMC install helper" "info"
+
+	run_host_command_logged install -d -m 0755 "${destination}/usr/sbin"
+	run_host_command_logged install -m 0755 \
+		"${SRC}/packages/bsp/sophgo-sg200x/usr/sbin/sophgo-emmc-install" \
+		"${destination}/usr/sbin/sophgo-emmc-install"
 }
 
 # Nothing gives the SG200x ethernet a MAC address - the device tree has none, the
