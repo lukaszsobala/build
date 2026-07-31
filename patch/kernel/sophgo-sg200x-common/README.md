@@ -5,7 +5,7 @@
 pending LKML postings for the SG2000/SG2002 (CV181x) SoCs plus a few fixes of
 its own. They are `git am`-format and apply cleanly to **Linux 7.0 and 7.2**.
 
-`0038` – `0049` are Armbian's, and are described below.
+`0038` – `0051` are Armbian's, and are described below.
 
 The series is applied on both branches, and the gaps in it are patches that only
 one of them wants: `0001` and `0003` are in `sophgo-sg200x-bindings-7.0` and
@@ -30,7 +30,7 @@ RISC-V-only are in fact needed by both builds, and both families point
 
 The reverse also holds, which is why there is no second directory for arm64:
 the patches that touch only `arch/arm64/boot/dts/sophgo/` (`0002`, `0039`,
-`0041`, `0043`, `0045`, `0047` and `0049`) are inert on a RISC-V build, since
+`0041`, `0043`, `0045`, `0047`, `0049` and `0051`) are inert on a RISC-V build, since
 it never descends into `arch/arm64`. Keeping them here means one series to rebase
 when the kernel is bumped, and no way for the two architectures' trees to drift
 apart.
@@ -113,8 +113,9 @@ probe kills the boot the same silent way.
 
 `dr_mode = "host"` sidesteps all of it - dwc2 leaves `gadget_enabled` clear, so
 neither the gadget nor the role switch is built. The price is the Type-C
-receptacle's device mode, permanently. This board can pay it: it has ethernet,
-so headless setup does not need USB networking.
+receptacle's device mode, for as long as the board is booted this way. This
+board can pay it: it has ethernet, so headless setup does not need USB
+networking. `0050`/`0051` give it back as a boot-time choice.
 
 The other known limit is that there is no real OTG detection. Modelling the
 port with `gpio-usb-b-connector` would give it - `USB_ID` is `XGPIOB_4` and
@@ -229,6 +230,51 @@ The `#address-cells`/`#size-cells` restated in the fragment match the base node
 and are only there to stop dtc warning about the `reg` length: compiling an
 overlay on its own, it cannot see the target's cell counts and assumes `<2>`/
 `<1>`.
+
+## 0050, 0051 — a USB device-mode overlay
+
+`0040`/`0041` pin the port to host mode, which is right for a board with
+ethernet and wrong as the only option: presenting the Duo S to a laptop as a USB
+network adapter is the thing it is best known for. These put device mode back as
+a boot-time choice:
+
+```text
+# /boot/armbianEnv.txt
+overlays=usb-device
+```
+
+Boot-time and not runtime, because `dr_mode` is read once by
+`dwc2_get_dr_mode()` at probe, and the mechanism that would allow a runtime
+switch is the `usb-role-switch` that hangs this SoC (above).
+
+Peripheral mode itself is safe, and the reason is worth stating because the hang
+above makes it look like it might not be. `dwc2_drd_init()` returns immediately
+unless the node carries `usb-role-switch`, so it never reaches the
+`dwc2_ovr_init()` that wedges the boot; what is left is the path mainline's
+`dr_mode = "otg"` already took on this board before we pinned a role, minus the
+host controller. Nothing needs to touch the PHY's ID override either, which is
+how `milkv-usb-duos` does it from userspace: dwc2 forces the role in `GUSBCFG`
+from `dr_mode` and never calls `phy_set_mode()` at all, leaving
+`cv1800_usb_phy_set_mode()` the dead code it already was.
+
+The second fragment is the easy one to miss. `phy-supply` on `&usbphy` is what
+drives the Type-A port's VBUS, and peripheral mode still enables it -
+`dwc2_hsotg_udc_start()` calls `dwc2_lowlevel_hw_enable()`, which calls
+`phy_power_on()` - so the port would be pushing 5V out of a board that is itself
+being powered over the Type-C, for as long as the gadget is up. `duos-usb-switch`
+drives both of those GPIOs low for device mode for the same reason. **An overlay
+cannot delete a property** - the flattened overlay format has no encoding for
+it - so `phy-supply` is redirected to a `regulator-fixed` that drives nothing,
+which leaves `reg_usb_vbus` with no consumer and the regulator core never enables
+it, nor its `vin-supply`.
+
+The Makefile hunk carries the same composite-target arrangement as `0048`/`0049`,
+for the same two reasons.
+
+Turning a UDC into a network interface is userspace's job, and none of it is
+here: `sg200x-usb-gadget.service` from `packages/bsp/sophgo-sg200x` composes a
+CDC-NCM gadget over configfs and is installed on every SG200x image, doing
+nothing at all until a UDC appears.
 
 ## Which peripherals actually have pins
 
