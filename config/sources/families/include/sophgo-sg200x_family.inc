@@ -65,7 +65,7 @@ declare -g BOOTSCRIPT="boot-sophgo-sg200x.cmd:boot.cmd"
 declare -g OVERLAY_PREFIX="sg2000"
 
 # Identifies the duo-buildroot-sdk-v2 project whose board files we vendored.
-# See packages/sophgo-sg200x/u-boot/README.md. The per-arch half of this set -
+# See u-boot.md in the milkv-duos-docs repo. The per-arch half of this set -
 # SOPHGO_CVI_PROJECT, _BOARD, _FILES_VARIANT, _UBOOT_DTS_DIR, _UBOOT_ARCH and
 # SOPHGO_FSBL_ARCH - lives in the family files.
 declare -g SOPHGO_CVI_CHIP="sg2000"
@@ -150,7 +150,7 @@ function extension_prepare_config__100_sophgo_sg200x_storage_suffix() {
 # SOC_PERIPHERAL_IRQ() to emit GIC_SPI specifiers, so the entire SoC description
 # is shared and so are the patches that touch it. The handful of arm64-only DTS
 # patches in there are inert on a RISC-V build, which never descends into
-# arch/arm64. See patch/kernel/sophgo-sg200x-common/README.md.
+# arch/arm64. See kernel-patches.md in the milkv-duos-docs repo.
 case "${BRANCH}" in
 
 	edge)

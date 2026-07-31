@@ -45,8 +45,8 @@
 #
 # The vendor U-Boot does not build standalone: its board description lives in
 # the SDK, not in the U-Boot tree. Those files are vendored under
-# packages/sophgo-sg200x/u-boot/ and copied in below. See that directory's
-# README.md.
+# packages/sophgo-sg200x/u-boot/ and copied in below. See u-boot.md in the
+# milkv-duos-docs repo.
 #
 # None of the three build with a modern toolchain untouched. binutils 2.38 split
 # zicsr and zifencei out of the base ISA, and each component needs a different

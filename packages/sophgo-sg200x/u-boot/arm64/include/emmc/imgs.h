@@ -1,5 +1,5 @@
 /* Armbian: hand-written, not an SDK mk_imgHeader.py output. See
- * packages/sophgo-sg200x/u-boot/README.md.
+ * u-boot.md in the milkv-duos-docs repo.
  *
  * The filenames cvi_update looks for in the FAT root of the installer SD card,
  * in the order it flashes them. Slot 0 is never read: both _storage_update()

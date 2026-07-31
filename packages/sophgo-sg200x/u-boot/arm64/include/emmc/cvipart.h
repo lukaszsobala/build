@@ -1,5 +1,5 @@
-/* Armbian: hand-written, not an SDK mkcvipart.py output. See
- * packages/sophgo-sg200x/u-boot/README.md.
+/* Armbian: hand-written, not an SDK mkcvipart.py output. See u-boot.md in
+ * the milkv-duos-docs repo.
  *
  * PARTS_OFFSET below transcribes the vendor eMMC layout from
  * partition_emmc.xml as shipped in milkv-duos-emmc-v1.1.4, converted from the
