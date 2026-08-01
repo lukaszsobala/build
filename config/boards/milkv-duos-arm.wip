@@ -18,7 +18,7 @@
 # two share (zram tuning, SERIALCON, kernel branches, bootloader, boot script)
 # is in the family, which is why only BOARDFAMILY below differs from
 # milkv-duos-riscv. The bootloader is built from source; see
-# config/sources/families/include/sophgo-sg200x_uboot.inc.
+# config/sources/families/include/sophgo-sg200x_common.inc.
 #
 # To run from the eMMC instead of the card, build this same board with
 #
