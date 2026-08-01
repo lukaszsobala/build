@@ -86,7 +86,7 @@ esac
 # diffable by filename.
 declare -g KERNELPATCHDIR="archive/sophgo-sg200x-${KERNEL_MAJOR_MINOR}" # Don't use symlinks.
 
-# The AIC8800 Wi-Fi module is handled by the sophgo-aic8800 extension, and
+# The AIC8800 Wi-Fi module is handled by the sophgo-sg200x-aic8800 extension, and
 # 512MB of RAM does not leave room to build the rest of Armbian's WiFi drivers.
 declare -g EXTRAWIFI="no"
 
@@ -729,7 +729,7 @@ function post_family_tweaks_bsp__sophgo_sg200x_emmc_install_tool() {
 # CONFIG_NET_RANDOM_ETHADDR - so the kernel makes one up on every boot and the
 # board's DHCP lease moves with it. Derive one from the chip's efuse serial
 # instead. The helper is shared with the wifi side, which has the same problem for
-# a different reason; extensions/sophgo-aic8800.sh installs the rule for that and
+# a different reason; extensions/sophgo-sg200x-aic8800.sh installs the rule for that and
 # relies on the script landing here (both write into the same armbian-bsp-cli).
 function post_family_tweaks_bsp__sophgo_sg200x_stable_mac() {
 	display_alert "Sophgo SG200x" "installing stable MAC address helper" "info"

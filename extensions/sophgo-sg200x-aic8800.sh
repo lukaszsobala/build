@@ -7,16 +7,27 @@
 # This file is a part of the Armbian Build Framework
 # https://github.com/armbian/build/
 #
-# Extension: sophgo-aic8800
+# Extension: sophgo-sg200x-aic8800
 #
 # AIC8800D80 Wi-Fi 6 + Bluetooth 5 support for Sophgo SG200x boards (Milk-V
 # Duo S), where the chip hangs off SDIO (sdhci1) and its enable line is a pin
 # that has to be poked directly - there is no mainline driver.
 #
-# The sources are the vendor driver out of Milk-V's duo-buildroot-sdk-v2, as
-# cleaned up for modern kernels by queenkjuul. They are copied into the kernel
-# tree and built as ordinary in-tree modules, which is much cheaper than DKMS
-# under qemu and needs no headers package on the target.
+# Named for the board family, not the chip: AICSemi make the AIC8800, and the
+# tree already has two other extensions for it. Both of those install prebuilt
+# DKMS debs from third-party release pages - brostrend-aic8800-dkms.sh from
+# Shadowrom2020/aic8800-dkms, radxa-aic8800.sh from radxa-pkg/aic8800, the latter
+# skipping itself on kernels 7.2 and newer. Neither can serve this board, so this
+# extension takes the other route: the vendor driver out of Milk-V's
+# duo-buildroot-sdk-v2, as cleaned up for modern kernels by queenkjuul, copied
+# into the kernel tree and built as ordinary in-tree modules. That is much
+# cheaper than DKMS under qemu, needs no headers package on the target, and is
+# what makes 7.2 work.
+#
+# What is not board-specific is shared rather than duplicated: the two build
+# fixes live in patch/misc/aic8800/ next to the other driver patches, and the
+# Bluetooth attach script and unit in packages/bsp/aic8800/ alongside the
+# aic-bluetooth pair already there.
 #
 # The copy happens from custom_kernel_config, not kernel_copy_extra_sources:
 # patching does a git reset --hard plus a clean of untracked files, so anything
@@ -39,18 +50,18 @@ declare -g AIC8800_REF="commit:ccf8fd059f70384fae4878c1048603510c2df700"
 #   modprobe aic8800_bsp aic_fw_path=/some/other/dir
 declare -g AIC8800_FW_DIR="/lib/firmware/aic8800/SDIO/aic8800D80"
 
-function post_family_config__sophgo_aic8800_fetch() {
+function post_family_config__sophgo_sg200x_aic8800_fetch() {
 	fetch_from_repo "${AIC8800_REPO}" "aic8800-milkv-duos" "${AIC8800_REF}" "yes"
 	declare -g AIC8800_SRC_DIR="${SRC}/cache/sources/aic8800-milkv-duos/${AIC8800_REF#*:}"
 }
 
-function custom_kernel_config__sophgo_aic8800_modules() {
+function custom_kernel_config__sophgo_sg200x_aic8800_modules() {
 	declare -a patches=()
-	mapfile -t patches < <(find "${SRC}/patch/misc/sophgo-aic8800" -maxdepth 1 -name '*.patch' | sort)
+	mapfile -t patches < <(find "${SRC}/patch/misc/aic8800" -maxdepth 1 -name '*.patch' | sort)
 
 	# Rebuild the kernel when the driver revision or the patches change.
-	kernel_config_modifying_hashes+=("sophgo_aic8800=${AIC8800_REF}")
-	kernel_config_modifying_hashes+=("sophgo_aic8800_patches=$(cat /dev/null "${patches[@]}" | sha256sum | cut -d' ' -f1)")
+	kernel_config_modifying_hashes+=("sophgo_sg200x_aic8800=${AIC8800_REF}")
+	kernel_config_modifying_hashes+=("sophgo_sg200x_aic8800_patches=$(cat /dev/null "${patches[@]}" | sha256sum | cut -d' ' -f1)")
 
 	# ...and when the firmware path changes, because it is compiled into the modules
 	# (see below). It has to be hashed here explicitly: the kernel_config_set_* helpers
@@ -59,7 +70,7 @@ function custom_kernel_config__sophgo_aic8800_modules() {
 	# artifact version. Leaving it out means the deb keeps its old name, the cached one
 	# built for the previous path is reused, and the driver spends the boot looking for
 	# firmware in a directory the rootfs no longer has.
-	kernel_config_modifying_hashes+=("sophgo_aic8800_fw_dir=${AIC8800_FW_DIR}")
+	kernel_config_modifying_hashes+=("sophgo_sg200x_aic8800_fw_dir=${AIC8800_FW_DIR}")
 
 	# Also called during config dumping / version calculation, with no kernel tree.
 	[[ ! -f .config ]] && return 0
@@ -67,7 +78,7 @@ function custom_kernel_config__sophgo_aic8800_modules() {
 	declare wireless_dir="${kernel_work_dir}/drivers/net/wireless"
 	declare driver_dir="${wireless_dir}/aicsemi"
 
-	display_alert "Sophgo AIC8800" "adding driver to kernel tree" "info"
+	display_alert "SG200x AIC8800" "adding driver to kernel tree" "info"
 
 	run_host_command_logged rm -rf "${driver_dir}"
 	run_host_command_logged mkdir -p "${driver_dir}"
@@ -78,7 +89,7 @@ function custom_kernel_config__sophgo_aic8800_modules() {
 	# kernel tree, not to the shared cache/sources checkout.
 	declare patch_file
 	for patch_file in "${patches[@]}"; do
-		display_alert "Sophgo AIC8800" "applying $(basename "${patch_file}")" "info"
+		display_alert "SG200x AIC8800" "applying $(basename "${patch_file}")" "info"
 		run_host_command_logged patch --batch -p1 -d "${kernel_work_dir}" "<" "${patch_file}" ||
 			exit_with_error "AIC8800 patch did not apply" "$(basename "${patch_file}")"
 	done
@@ -120,10 +131,10 @@ function custom_kernel_config__sophgo_aic8800_modules() {
 # miserable thing to debug from the far end - so fail the build instead.
 # INSTALL_ARMBIAN_FIRMWARE=no, or armbian/firmware reorganising the directory, are
 # the ways it can go missing.
-function post_family_tweaks__sophgo_aic8800_firmware() {
+function post_family_tweaks__sophgo_sg200x_aic8800_firmware() {
 	declare fw_dir="${SDCARD}${AIC8800_FW_DIR}"
 
-	display_alert "Sophgo AIC8800" "checking firmware from armbian-firmware" "info"
+	display_alert "SG200x AIC8800" "checking firmware from armbian-firmware" "info"
 
 	# aic8800_bsp uploads the first four - fw_adid/fw_patch/fw_patch_table are the
 	# Bluetooth patch it pushes over SDIO, fmacfw is the Wi-Fi MAC firmware - and
@@ -158,11 +169,11 @@ function post_family_tweaks__sophgo_aic8800_firmware() {
 # rootfs-to-image.sh, and update_initramfs follows immediately. Writes from the
 # later hook still "succeed" - ${SDCARD} is a live host path - but never reach the
 # image.
-function post_family_tweaks__sophgo_aic8800_modprobe() {
-	display_alert "Sophgo AIC8800" "configuring module load order" "info"
+function post_family_tweaks__sophgo_sg200x_aic8800_modprobe() {
+	display_alert "SG200x AIC8800" "configuring module load order" "info"
 
 	mkdir -p "${SDCARD}/etc/modprobe.d"
-	cat <<- 'EOF' > "${SDCARD}/etc/modprobe.d/sophgo-aic8800.conf"
+	cat <<- 'EOF' > "${SDCARD}/etc/modprobe.d/aic8800.conf"
 		# aic8800_bsp brings the chip out of reset and uploads firmware; the
 		# wifi and bluetooth drivers are useless until it has run.
 		softdep aic8800_fdrv pre: aic8800_bsp
@@ -170,7 +181,7 @@ function post_family_tweaks__sophgo_aic8800_modprobe() {
 	EOF
 
 	mkdir -p "${SDCARD}/etc/modules-load.d"
-	cat <<- 'EOF' > "${SDCARD}/etc/modules-load.d/sophgo-aic8800.conf"
+	cat <<- 'EOF' > "${SDCARD}/etc/modules-load.d/aic8800.conf"
 		# aic8800_btlpm is deliberately not here: it only adds an rfkill for
 		# gating the BT subsystem, and the controller is already live once the
 		# bsp has run - Bluetooth works without it.
@@ -184,17 +195,17 @@ function post_family_tweaks__sophgo_aic8800_modprobe() {
 # baud rate the patch table announces. These go into the BSP package rather than
 # straight into ${SDCARD} because they are executable assets: dpkg then owns them
 # and an armbian-bsp-cli upgrade carries fixes to installed systems.
-function post_family_tweaks_bsp__sophgo_aic8800_bluetooth() {
-	display_alert "Sophgo AIC8800" "installing Bluetooth attach service" "info"
+function post_family_tweaks_bsp__sophgo_sg200x_aic8800_bluetooth() {
+	display_alert "SG200x AIC8800" "installing Bluetooth attach service" "info"
 
 	run_host_command_logged install -d -m 0755 "${destination}/usr/bin"
 	run_host_command_logged install -m 0755 \
-		"${SRC}/packages/bsp/sophgo-aic8800/aic8800-bluetooth" \
+		"${SRC}/packages/bsp/aic8800/aic8800-bluetooth" \
 		"${destination}/usr/bin/aic8800-bluetooth"
 
 	run_host_command_logged install -d -m 0755 "${destination}/usr/lib/systemd/system"
 	run_host_command_logged install -m 0644 \
-		"${SRC}/packages/bsp/sophgo-aic8800/aic8800-bluetooth.service" \
+		"${SRC}/packages/bsp/aic8800/aic8800-bluetooth.service" \
 		"${destination}/usr/lib/systemd/system/aic8800-bluetooth.service"
 }
 
@@ -204,16 +215,16 @@ function post_family_tweaks_bsp__sophgo_aic8800_bluetooth() {
 # ethernet has the same problem - so it is installed by
 # sophgo-sg200x_common.inc and only the rule is added here. Both land in the same
 # armbian-bsp-cli, so there is no ordering or packaging dependency between them.
-function post_family_tweaks_bsp__sophgo_aic8800_stable_mac() {
-	display_alert "Sophgo AIC8800" "installing stable Wi-Fi MAC address rule" "info"
+function post_family_tweaks_bsp__sophgo_sg200x_aic8800_stable_mac() {
+	display_alert "SG200x AIC8800" "installing stable Wi-Fi MAC address rule" "info"
 
 	run_host_command_logged install -d -m 0755 "${destination}/etc/udev/rules.d"
 	run_host_command_logged install -m 0644 \
-		"${SRC}/packages/bsp/sophgo-aic8800/70-sg200x-stable-mac-wifi.rules" \
+		"${SRC}/packages/bsp/sophgo-sg200x/etc/udev/rules.d/70-sg200x-stable-mac-wifi.rules" \
 		"${destination}/etc/udev/rules.d/70-sg200x-stable-mac-wifi.rules"
 }
 
-function post_family_tweaks__sophgo_aic8800_bluetooth_enable() {
-	display_alert "Sophgo AIC8800" "enabling Bluetooth attach service" "info"
+function post_family_tweaks__sophgo_sg200x_aic8800_bluetooth_enable() {
+	display_alert "SG200x AIC8800" "enabling Bluetooth attach service" "info"
 	chroot_sdcard systemctl --no-reload enable aic8800-bluetooth.service
 }

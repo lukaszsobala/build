@@ -55,4 +55,4 @@ BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
 # family include even though both variants want the same thing.
 PACKAGE_LIST_BOARD_REMOVE="snapd cloud-init"
 
-enable_extension "sophgo-aic8800"
+enable_extension "sophgo-sg200x-aic8800"
