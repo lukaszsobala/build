@@ -112,7 +112,6 @@ function artifact_uboot_prepare_version() {
 		"${DDR_BLOB}" "${BL31_BLOB}" "${BL32_BLOB}" "${MINILOADER_BLOB}" # More rockchip stuff, even more sorry.
 		"${ATF_COMPILE}" "${ATFSOURCE}" "${ATFBRANCH}" "${ATFPATCHDIR}" "${ATF_TARGET_MAP}" "${ATF_LOG_LEVEL:-40}" # arm-trusted-firmware stuff
 		"${CRUSTCONFIG}" "${CRUSTBRANCH}" "${CRUSTPATCHDIR}"             # crust stuff
-		"${SOPHGO_CPU_OVERDRIVE}"                                        # sophgo sg200x: picks the OD_CLK_SEL PLL table in the FSBL
 		"${IMAGE_PARTITION_TABLE}" "${BOOT_FDT_FILE}" "${SERIALCON}"     # image and kernel related, to be used as reference/docs
 		"${SRC_EXTLINUX}" "${SRC_CMDLINE}"                               # image and kernel related, to be used as reference/docs
 	)

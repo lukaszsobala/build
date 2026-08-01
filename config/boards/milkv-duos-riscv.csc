@@ -49,6 +49,11 @@ KERNEL_TARGET="edge,bleedingedge"
 # expected to break whenever it moves.
 KERNEL_TEST_TARGET="edge"
 BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
+# The silicon could in principle drive a panel through pins on the GPIO
+# headers, but no device tree we ship enables any of it, so every image is
+# serial-console only. Board level rather than family, because the build-list
+# inventory reads board files and would otherwise schedule desktop images.
+HAS_VIDEO_OUTPUT="no"
 
 # 512MB of RAM does not go far; keep the userspace lean. PACKAGE_LIST_BOARD*
 # is made readonly right after this file is sourced, so it cannot move into the
