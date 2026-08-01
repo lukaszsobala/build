@@ -26,7 +26,7 @@ alone and as a set.
 Signed-off-by: Armbian <info@armbian.com>
 ---
  arch/arm64/boot/dts/sophgo/Makefile           | 28 ++++++++
- .../boot/dts/sophgo/overlay/sg2000-i2c1.dtso  | 54 ++++++++++++++++
+ .../boot/dts/sophgo/overlay/sg2000-i2c1.dtso  | 66 ++++++++++++++++++++
  .../boot/dts/sophgo/overlay/sg2000-i2c4.dtso  | 45 +++++++++++++
  .../boot/dts/sophgo/overlay/sg2000-pwm0.dtso  | 55 ++++++++++++++++
  .../boot/dts/sophgo/overlay/sg2000-pwm1.dtso  | 45 +++++++++++++
@@ -34,7 +34,7 @@ Signed-off-by: Armbian <info@armbian.com>
  .../boot/dts/sophgo/overlay/sg2000-spi3.dtso  | 51 +++++++++++++++
  .../boot/dts/sophgo/overlay/sg2000-uart1.dtso | 64 +++++++++++++++++++
  .../boot/dts/sophgo/overlay/sg2000-uart2.dtso | 48 ++++++++++++++
- 9 files changed, 428 insertions(+)
+ 9 files changed, 440 insertions(+)
  create mode 100644 arch/arm64/boot/dts/sophgo/overlay/sg2000-i2c1.dtso
  create mode 100644 arch/arm64/boot/dts/sophgo/overlay/sg2000-i2c4.dtso
  create mode 100644 arch/arm64/boot/dts/sophgo/overlay/sg2000-pwm0.dtso
@@ -82,10 +82,10 @@ index 801255f..4377eb7 100644
 +dtb-$(CONFIG_ARCH_SOPHGO) += overlay/sg2000-pwm1.dtbo
 diff --git a/arch/arm64/boot/dts/sophgo/overlay/sg2000-i2c1.dtso b/arch/arm64/boot/dts/sophgo/overlay/sg2000-i2c1.dtso
 new file mode 100644
-index 0000000..302cc55
+index 0000000..74aae94
 --- /dev/null
 +++ b/arch/arm64/boot/dts/sophgo/overlay/sg2000-i2c1.dtso
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,66 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Milk-V Duo S: I2C1 on the 26-pin header (J3).
@@ -115,6 +115,17 @@ index 0000000..302cc55
 + * enough for a short lead at 100kHz and not much more. Fit real ones on the
 + * bus if it misbehaves; they simply parallel these.
 + *
++ * bias-pull-down = <0> is not redundant with that. These pads come up with the
++ * pull-down already enabled - conf reads 0x48 on every pad this overlay set
++ * touches - and cv1800_pconf_compute_config() puts only the properties a group
++ * actually names into its write mask, which cv1800_set_pinconf_config() then
++ * applies as a read-modify-write. So bias-pull-up on its own leaves both pulls
++ * on: 60k up against 62k down, which parks a released line near half rail, well
++ * short of the ~2.3V a 3.3V bus needs to read as a high. Naming the pull-down is
++ * what clears it. Check it rather than trusting it - conf on VIVO_D10 and
++ * VIVO_D9 in /sys/kernel/debug/pinctrl/3001000.pinctrl/pins reads 0x44 when this
++ * worked and 0x4c when it did not.
++ *
 + * Conflicts with the pwm0 overlay, which wants the same two pads for PWM_1 and
 + * PWM_2.
 + */
@@ -130,6 +141,7 @@ index 0000000..302cc55
 +			pinmux = <PINMUX(PIN_VIVO_D10, 6)>,
 +				 <PINMUX(PIN_VIVO_D9, 6)>;
 +			bias-pull-up;
++			bias-pull-down = <0>;
 +			power-source = <3300>;
 +		};
 +	};
