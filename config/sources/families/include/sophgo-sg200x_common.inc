@@ -143,11 +143,17 @@ declare -g SOPHGO_OPENSBI_REF="${SOPHGO_OPENSBI_REF:-commit:6766e9cc96df51cde915
 #
 #     ./compile.sh build BOARD=milkv-duos-riscv BRANCH=edge SOPHGO_CPU_OVERDRIVE=no
 #
-# It is listed in artifact-uboot.sh's vars_to_hash, so the two settings produce
-# different u-boot artifact versions and both can sit in the cache at once.
-# Without that it would be silently ignored on any build that had a cached
-# artifact, which is every build after the first.
+# Folded into UBOOT_HASH_EXTRA below, so the two settings produce different
+# u-boot artifact versions and both can sit in the cache at once. Without that
+# it would be silently ignored on any build that had a cached artifact, which
+# is every build after the first. UBOOT_HASH_EXTRA rather than a new entry in
+# artifact-uboot.sh's vars_to_hash: the hash input there is one space-joined
+# string, so a new entry changes it for every board even where it expands
+# empty, and the opt-in variable exists precisely so a family can extend the
+# hash without that churn - rockchip-rv1126.conf folds its blob names in the
+# same way.
 declare -g SOPHGO_CPU_OVERDRIVE="${SOPHGO_CPU_OVERDRIVE:-yes}"
+declare -g UBOOT_HASH_EXTRA="${UBOOT_HASH_EXTRA:-} sophgo-cpu-overdrive-${SOPHGO_CPU_OVERDRIVE}"
 
 # That vendor U-Boot is patched for distroboot, which scans the first bootable
 # partition for /extlinux/extlinux.conf and then, failing that, for /boot.scr -
