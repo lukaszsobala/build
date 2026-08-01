@@ -40,9 +40,14 @@
 #
 # https://milkv.io/duo-s
 BOARD_NAME="Milk-V Duo S"
+BOARD_VENDOR="milkv"
 BOARDFAMILY="sophgo-sg200x-arm64"
 BOARD_MAINTAINER="lukaszsobala"
+INTRODUCED="2024"
 KERNEL_TARGET="edge,bleedingedge"
+# Only edge is worth gating on: bleedingedge tracks a release candidate and is
+# expected to break whenever it moves.
+KERNEL_TEST_TARGET="edge"
 BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
 
 # 512MB of RAM does not go far; keep the userspace lean. PACKAGE_LIST_BOARD*
