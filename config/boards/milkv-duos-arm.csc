@@ -29,7 +29,7 @@
 # image; write it with sophgo-emmc-install from a running SD system, which also
 # puts fip.bin into the eMMC hardware boot partition - the one part of the eMMC
 # a disk image cannot describe, and without which the board will not boot.
-# ENABLE_EXTENSIONS=sophgo-sg200x-emmc-installer turns that image into a
+# ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer turns that image into a
 # self-flashing card instead, for when there is no system to install from.
 #
 # There is deliberately no SRC_CMDLINE. It is read only on the extlinux path and

@@ -5,7 +5,14 @@
 # This file is a part of the Armbian Build Framework
 # https://github.com/armbian/build/
 #
+# Extension: image-output-sophgo-emmc-installer
+#
 # Turns the built .img into an eMMC installer card for the Milk-V Duo S.
+#
+# image-output-, because that is what this is: like image-output-oowow and the
+# rest, it hooks post_build_image__900_ and rewrites the finished image into
+# another format. Nothing else in here is unusual enough to deserve a category
+# of its own.
 #
 # Opt-in, and the second-choice route. SOPHGO_CVI_STORAGE=emmc on its own now
 # produces an ordinary bootable image, which /usr/sbin/sophgo-emmc-install
@@ -19,7 +26,7 @@
 # being installed. Enable it explicitly:
 #
 #   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge SOPHGO_CVI_STORAGE=emmc \
-#       ENABLE_EXTENSIONS=sophgo-sg200x-emmc-installer
+#       ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer
 #
 # It also remains the one path exercised end to end on real hardware.
 #
@@ -131,7 +138,7 @@
 #
 #        ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge \
 #            SOPHGO_CVI_STORAGE=emmc \
-#            ENABLE_EXTENSIONS=sophgo-sg200x-emmc-installer
+#            ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer
 #
 #      -> Armbian_..._Milkv-duos-arm_..._7.0.14-emmc-installer_minimal.img.xz.
 #      "-emmc" comes from the family, "-installer" from here; the board name is

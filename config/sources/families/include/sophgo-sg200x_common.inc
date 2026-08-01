@@ -216,7 +216,7 @@ declare -g SOPHGO_CVI_FILES_DIR="${SRC}/packages/sophgo-sg200x/u-boot"
 # turned into a self-flashing installer card instead:
 #
 #   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge SOPHGO_CVI_STORAGE=emmc \
-#       ENABLE_EXTENSIONS=sophgo-sg200x-emmc-installer
+#       ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer
 #
 # There used to be a milkv-duos-arm-emmc and a milkv-duos-riscv-emmc whose only
 # real content was this one line, which made four board files for two physical
@@ -355,7 +355,7 @@ function fetch_custom_uboot__sophgo_sg200x_fsbl() {
 	fsbl_subdir="$(branch2dir "${SOPHGO_FSBL_REF}")"
 	declare -g SOPHGO_FSBL_DIR="${SRC}/cache/sources/sophgo-fsbl/${fsbl_subdir}"
 
-	sophgo_sg200x_apply_patches "fsbl-sophgo-sg200x" "${SOPHGO_FSBL_DIR}" "FSBL"
+	sophgo_sg200x_apply_patches "fsbl/sophgo-sg200x" "${SOPHGO_FSBL_DIR}" "FSBL"
 
 	[[ "${SOPHGO_FSBL_ARCH}" == "riscv" ]] || return 0
 
@@ -365,20 +365,26 @@ function fetch_custom_uboot__sophgo_sg200x_fsbl() {
 	opensbi_subdir="$(branch2dir "${SOPHGO_OPENSBI_REF}")"
 	declare -g SOPHGO_OPENSBI_DIR="${SRC}/cache/sources/sophgo-opensbi/${opensbi_subdir}"
 
-	sophgo_sg200x_apply_patches "opensbi-sophgo-sg200x" "${SOPHGO_OPENSBI_DIR}" "OpenSBI"
+	sophgo_sg200x_apply_patches "opensbi/sophgo-sg200x" "${SOPHGO_OPENSBI_DIR}" "OpenSBI"
 }
 
 # Neither the FSBL nor OpenSBI has Armbian patch machinery behind it: ATFSOURCE
 # is "none", so compile_atf() - and with it ATFPATCHDIR and advanced_patch() -
-# never runs. Both sets live under patch/atf/ regardless, because both fill the
-# monitor role that bl31.bin fills on ARM, and that is where a reader will look.
+# never runs. Hence this, and hence patch/fsbl/ and patch/opensbi/ rather than a
+# corner of patch/atf/: every directory in there is ARM Trusted Firmware and is
+# applied by the framework, and neither is true of these. patch/crust/ is the
+# precedent - the AR100 firmware fills a comparable role on Allwinner and got a
+# directory of its own rather than a slot in patch/atf.
+#
+# The argument passed in is the path under patch/, so a second SoC's FSBL can sit
+# beside this one.
 #
 # fetch_from_repo() has just done a 'git checkout -f' plus 'git clean -df', so
 # each tree is pristine on every build and a plain apply is enough; the
 # already-applied branch only exists so a re-run inside one build does not
 # produce a baffling failure.
 function sophgo_sg200x_apply_patches() {
-	declare patch_dir="${SRC}/patch/atf/${1}"
+	declare patch_dir="${SRC}/patch/${1}"
 	declare target_dir="${2}"
 	declare label="${3}"
 	[[ -d "${patch_dir}" ]] || return 0
