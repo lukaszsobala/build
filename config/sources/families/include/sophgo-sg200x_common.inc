@@ -53,9 +53,6 @@ case "${BRANCH}" in
 	edge)
 		declare -g KERNEL_MAJOR_MINOR="7.0"
 		declare -g LINUXCONFIG="linux-${LINUXFAMILY}-edge"
-		# CV1800B DMA support is not upstream until 7.1, and the SG2000 DT
-		# bindings not until 7.2; both are carried here for 7.0 only.
-		declare -g KERNELPATCHDIR="sophgo-sg200x-common sophgo-sg200x-dmac-7.0 sophgo-sg200x-bindings-7.0"
 		;;
 
 	# Bleeding edge follows the current release candidate, so it moves; that is
@@ -74,10 +71,20 @@ case "${BRANCH}" in
 		declare -g KERNEL_MAJOR_MINOR="7.2"
 		declare -g KERNELBRANCH="tag:v7.2-rc5"
 		declare -g LINUXCONFIG="linux-${LINUXFAMILY}-bleedingedge"
-		declare -g KERNELPATCHDIR="sophgo-sg200x-common"
 		;;
 
 esac
+
+# One patch directory per kernel version, the way every other mainline family
+# does it. The series is otherwise identical between the two, so a new version
+# starts as a copy of the previous one: patches that have landed upstream are
+# deleted, the rest are refreshed. 7.0 additionally carries four backports that
+# 7.2 gets from upstream - the CV1800B DMA driver, upstream in 7.1, and the
+# SG2000 DT bindings, upstream in 7.2 - which is why the numbering in the 7.2
+# directory has gaps where 0001, 0003, 0024 and 0025 would be. Keeping the
+# numbers aligned across directories is deliberate: it makes the two series
+# diffable by filename.
+declare -g KERNELPATCHDIR="archive/sophgo-sg200x-${KERNEL_MAJOR_MINOR}" # Don't use symlinks.
 
 # The AIC8800 Wi-Fi module is handled by the sophgo-aic8800 extension, and
 # 512MB of RAM does not leave room to build the rest of Armbian's WiFi drivers.
