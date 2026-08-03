@@ -14,18 +14,18 @@
 # another format. Nothing else in here is unusual enough to deserve a category
 # of its own.
 #
-# Opt-in, and the second-choice route. SOPHGO_CVI_STORAGE=emmc on its own now
-# produces an ordinary bootable image, which /usr/sbin/sophgo-emmc-install
-# writes onto the eMMC from a running SD system - two dd's, one to the user area
-# and one to the hardware boot partition the image cannot reach. That is the
-# path to prefer: what comes out is a system rather than a flasher, so it can be
-# inspected, mounted, and written by any means that can reach a block device.
+# Opt-in, and the second-choice route. The ordinary image is already installable:
+# /usr/sbin/sophgo-emmc-install writes it onto the eMMC from a running card
+# system - two dd's, one to the user area and one to the hardware boot partition
+# the image cannot reach. That is the path to prefer: what comes out is a system
+# rather than a flasher, so it can be inspected, mounted, and written by any
+# means that can reach a block device.
 #
 # This extension is for when there is no running system to do that from - a
 # board whose card slot is occupied, in use, or whose only Linux is the one
 # being installed. Enable it explicitly:
 #
-#   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge SOPHGO_CVI_STORAGE=emmc \
+#   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge \
 #       ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer
 #
 # It also remains the one path exercised end to end on real hardware.
@@ -134,15 +134,14 @@
 #
 # Installation, for the record:
 #
-#   0. build it - the eMMC storage type, plus this extension by name:
+#   0. build it - the ordinary image, plus this extension by name:
 #
 #        ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge \
-#            SOPHGO_CVI_STORAGE=emmc \
 #            ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer
 #
-#      -> Armbian_..._Milkv-duos-arm_..._7.0.14-emmc-installer_minimal.img.xz.
-#      "-emmc" comes from the family, "-installer" from here; the board name is
-#      the same one the plain SD image uses.
+#      -> Armbian_..._Milkv-duos-arm_..._7.0.14-installer_minimal.img.xz.
+#      "-installer" comes from here; the board name is the same one the plain
+#      image uses.
 #
 #   1. write that image to an SD card, as any other Armbian image
 #   2. insert the card and power on; watch the serial console
@@ -157,19 +156,13 @@
 #
 
 function extension_prepare_config__sophgo_emmc_installer() {
-	# Enabled by hand, so the storage type has to be checked rather than assumed:
-	# with an SD bootloader the fip.bin never runs cvi_update, so the installer
-	# would sit there doing nothing. Say so rather than shipping it.
-	if [[ "${SOPHGO_CVI_STORAGE}" != "emmc" ]]; then
-		exit_with_error "${EXTENSION} needs SOPHGO_CVI_STORAGE=emmc" \
-			"BOARD=${BOARD} builds a '${SOPHGO_CVI_STORAGE}' bootloader; add SOPHGO_CVI_STORAGE=emmc to the command line"
-	fi
+	# No storage type to check any more: every image carries both bootloaders,
+	# and this extension takes the eMMC one out of /boot/fip-emmc.bin. It used to
+	# demand SOPHGO_CVI_STORAGE=emmc, because with an SD bootloader in
+	# /boot/fip.bin the card would boot, never run cvi_update, and sit there doing
+	# nothing.
 
-	# Distinguishes the flasher from the bootable eMMC image it carries, which
-	# the family has already suffixed "-emmc". Unprefixed hook functions sort as
-	# 500_ and the family's is 100_, so the two come out in that order. This
-	# array is initialized before this hook runs and consolidated after it, so
-	# here is the place.
+	# Distinguishes the flasher from the ordinary bootable image it carries.
 	EXTRA_IMAGE_SUFFIXES+=("-installer")
 
 	# COMPRESS_OUTPUTIMAGE is deliberately left alone. The installer is an
@@ -206,23 +199,39 @@ function post_build_image__900_sophgo_emmc_installer() {
 	run_host_command_logged rm -rf "${work}"
 	run_host_command_logged mkdir -p "${work}"
 
-	# fip.bin is taken out of the image's own FAT partition, where
-	# write_uboot_platform() put it, rather than hunted down in output/debs. Several u-boot .debs for one BOARD/BRANCH can
-	# coexist there - one per artifact hash - and picking among them by name
-	# risks shipping a bootloader from an earlier configuration.
+	# The bootloader this card boots is the *eMMC* one, and that is the whole
+	# trick: only its CONFIG_BOOTCOMMAND runs cvi_update, and cvi_update only acts
+	# when the FSBL says it booted from SD. A card carrying it is the one
+	# combination that flashes an eMMC, which everywhere else in this family is
+	# the hazard to avoid and here is the entire point.
 	#
-	# Taking it from the image also guarantees the property that matters here:
-	# the fip.bin cvi_update writes into the eMMC boot hardware partition is the
-	# same file as the /boot/fip.bin inside the payload it writes next to it. If
-	# those two ever drifted apart the board would boot one and show the other.
+	# It comes out of the image's own FAT partition, where write_uboot_platform()
+	# puts it as fip-emmc.bin beside the SD one, rather than being hunted down in
+	# output/debs: several u-boot .debs for one BOARD/BRANCH can coexist there,
+	# one per artifact hash, and picking among them by name risks shipping a
+	# bootloader from an earlier configuration.
 	declare boot_offset
 	boot_offset="$(sfdisk -J "${image_file}" | python3 -c \
 		'import json,sys; print(json.load(sys.stdin)["partitiontable"]["partitions"][0]["start"] * 512)')"
 	[[ "${boot_offset}" =~ ^[0-9]+$ ]] || exit_with_error "could not read partition 1 offset" "${image_file}"
 
-	display_alert "${EXTENSION}" "extracting fip.bin from /boot (partition 1 at ${boot_offset})" "info"
-	run_host_command_logged mcopy -n -i "${image_file}@@${boot_offset}" ::/fip.bin "${work}/fip.bin"
-	[[ -s "${work}/fip.bin" ]] || exit_with_error "no fip.bin in the image's boot partition" "${image_file}"
+	display_alert "${EXTENSION}" "extracting fip-emmc.bin from /boot (partition 1 at ${boot_offset})" "info"
+	run_host_command_logged mcopy -n -i "${image_file}@@${boot_offset}" ::/fip-emmc.bin "${work}/fip.bin"
+	[[ -s "${work}/fip.bin" ]] ||
+		exit_with_error "no fip-emmc.bin in the image's boot partition" "${image_file}"
+
+	# The payload is an ordinary image, so its /boot/fip.bin is the SD bootloader.
+	# Once cvi_update has written it into the eMMC user area, boot0 will hold the
+	# eMMC one this card booted from - and the two would disagree, leaving a board
+	# that boots one bootloader and shows you another. Nothing reads /boot/fip.bin
+	# on an eMMC, but sophgo-emmc-install keeps them in step on the manual route
+	# and there is no reason for this one to be sloppier. cvi_update cannot be
+	# hooked, so fix the payload before it is wrapped.
+	display_alert "${EXTENSION}" "pointing the payload's /boot/fip.bin at the eMMC bootloader" "info"
+	echo "emmc" > "${work}/sophgo-storage.txt"
+	run_host_command_logged mcopy -o -i "${image_file}@@${boot_offset}" "${work}/fip.bin" ::/fip.bin
+	run_host_command_logged mcopy -o -i "${image_file}@@${boot_offset}" \
+		"${work}/sophgo-storage.txt" ::/sophgo-storage.txt
 
 	# armbian.emmc: the name cvi_update looks for, from imgs.h in
 	# packages/sophgo-sg200x/u-boot/*/include/emmc/. Offset 0 - the image starts

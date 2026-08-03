@@ -20,17 +20,15 @@
 # milkv-duos-arm. The bootloader is built from source; see
 # config/sources/families/include/sophgo-sg200x_common.inc.
 #
-# To run from the eMMC instead of the card, build this same board with
-#
-#   ./compile.sh build BOARD=milkv-duos-riscv BRANCH=edge SOPHGO_CVI_STORAGE=emmc
-#
-# A build switch rather than a board of its own, because the two differ only in
-# how the bootloader is configured. What comes out is an ordinary bootable
-# image; write it with sophgo-emmc-install from a running SD system, which also
-# puts fip.bin into the eMMC hardware boot partition - the one part of the eMMC
-# a disk image cannot describe, and without which the board will not boot.
-# ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer turns that image into a
-# self-flashing card instead, for when there is no system to install from.
+# One image runs from either medium; there is no separate eMMC build. It carries
+# both bootloaders - /boot/fip.bin, the SD one the BootROM opens by that name,
+# and /boot/fip-emmc.bin beside it - and sophgo-emmc-install uses the second when
+# writing the image onto the eMMC from a running card system. It has to: the
+# BootROM reads the bootloader out of the eMMC hardware boot partition, the one
+# part of the eMMC a disk image cannot describe, and without which the board will
+# not boot. ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer turns the same
+# image into a self-flashing card instead, for when there is no system to install
+# from.
 #
 # There is deliberately no SRC_CMDLINE. It is read only on the extlinux path and
 # when the boot script is a .template, and this family uses neither: console,

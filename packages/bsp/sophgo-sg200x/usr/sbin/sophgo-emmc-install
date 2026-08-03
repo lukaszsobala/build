@@ -23,13 +23,18 @@
 # neither do we. If BOOT_PARTITION_ENABLE were not already set on a given board,
 # the vendor installer would not work on it either.
 #
-# fip.bin is taken out of the image after it is written, not from the running
-# system's /boot. The running system is on a card and carries the *SD* variant,
-# whose device tree deletes cv-emmc@4300000 outright; put that in boot0 and
-# U-Boot comes up with no eMMC at all and nothing to boot from. Taking it from
-# the freshly written eMMC also guarantees the property that matters: the
-# bootloader in boot0 is the same file as the /boot/fip.bin beside it, so the
-# board can never boot one and show you the other.
+# There is one image and it serves both media, so /boot carries two bootloaders:
+# fip.bin, the SD variant, which is the only name a BootROM opens and therefore
+# the one a card boots; and fip-emmc.bin, which nothing boots and which exists
+# for this script. The eMMC one cannot go in /boot/fip.bin on a card - its device
+# tree keeps cv-emmc@4300000, which renumbers the card to mmc 1, and its
+# CONFIG_BOOTCOMMAND runs cvi_update first, which on a card boot would reflash
+# the eMMC from that very card instead of booting it.
+#
+# fip-emmc.bin is taken out of the image after it is written, not from the
+# running system, so that the bootloader in boot0 belongs to the system now in
+# the user area rather than to whatever is running this script. /boot/fip.bin on
+# the eMMC is then replaced with it, so the two never disagree.
 #
 # Usage:
 #   sophgo-emmc-install <image.img[.xz|.gz]> [device]
@@ -60,8 +65,8 @@ usage() {
 		  -y   do not ask for confirmation
 
 		Writes the image to the eMMC user area, then installs the image's own
-		fip.bin into the eMMC hardware boot partition, which is where the
-		BootROM looks for it and which the image itself cannot reach.
+		fip-emmc.bin into the eMMC hardware boot partition, which is where
+		the BootROM looks for it and which the image itself cannot reach.
 
 		With no device given, the single eMMC on the board is used.
 	EOF
@@ -193,8 +198,13 @@ sync
 partx -u "${target}" > /dev/null 2>&1 || partprobe "${target}" > /dev/null 2>&1 || true
 udevadm settle > /dev/null 2>&1 || sleep 2
 
-# p1 is the FAT /boot laid down by sophgo-sg200x_common.inc, and fip.bin sits in
-# its root because that is where the BootROM reads it from on an SD boot.
+# p1 is the FAT /boot laid down by sophgo-sg200x_common.inc. It carries two
+# bootloaders: fip.bin, the SD one, which is the only name a BootROM opens and so
+# the one a card boots; and fip-emmc.bin beside it, which nothing boots and which
+# exists precisely for this. Taking the eMMC one from the freshly written image
+# rather than from the running system keeps the guarantee that matters - the
+# bootloader in boot0 is the one that belongs to the system now sitting in the
+# user area, not to whatever happens to be running this script.
 part1="${target}p1"
 [[ -b "${part1}" ]] || part1="${target}1"
 [[ -b "${part1}" ]] || die "no first partition on ${target} after writing; is this an Armbian image?"
@@ -203,23 +213,13 @@ mnt="$(mktemp -d)"
 cleanup() { mountpoint -q "${mnt}" && umount "${mnt}"; rmdir "${mnt}" 2> /dev/null; }
 trap cleanup EXIT
 
-mount -o ro "${part1}" "${mnt}" || die "could not mount ${part1}"
-fip="${mnt}/fip.bin"
-[[ -s "${fip}" ]] || die "no fip.bin in the image's boot partition; this is not a Sophgo SG200x image"
+# Read-write: the eMMC's own /boot/fip.bin is replaced below, so that boot0 and
+# the file beside it never disagree.
+mount "${part1}" "${mnt}" || die "could not mount ${part1}"
+fip="${mnt}/fip-emmc.bin"
+[[ -s "${fip}" ]] || die "no fip-emmc.bin in the image's boot partition; this image predates one-image-for-both-media"
 
-# Which bootloader variant this is, stamped beside fip.bin by
-# write_uboot_platform() when the image was built. An SD fip.bin in boot0
-# leaves the board unbootable from eMMC - cv181x_asic_sd.dtsi deletes the eMMC
-# node, so U-Boot finds no storage at all - and there is no way to tell the two
-# apart from the file itself, since U-Boot is LZMA-compressed inside it.
-storage="$(tr -d '[:space:]' < "${mnt}/sophgo-storage.txt" 2> /dev/null)"
-case "${storage}" in
-	emmc) ;;
-	sd) die "this image was built for the SD card (SOPHGO_CVI_STORAGE=sd); rebuild with SOPHGO_CVI_STORAGE=emmc" ;;
-	*) warn "image does not say which storage it was built for; assuming eMMC" ;;
-esac
-
-info "installing fip.bin into ${boot0} (sectors 0 and 2048, as cvi_update does)"
+info "installing fip-emmc.bin into ${boot0} (sectors 0 and 2048, as cvi_update does)"
 
 # The backup copy goes a megabyte in, so boot0 has to hold that much plus the
 # file. Every eMMC on this board has 4MiB there, but a truncated second copy is
@@ -240,6 +240,24 @@ sync
 
 echo 1 > "${force_ro}" || warn "could not restore read-only on ${boot0}"
 [[ "${fip_status}" -eq 0 ]] || die "writing ${boot0} failed; the eMMC will not boot"
+
+# Read both copies back rather than trusting dd's exit status; boot0 is the one
+# place on this board where a bad write is not visible until the next boot.
+if ! cmp -s -n "${fip_bytes}" "${fip}" "${boot0}" ||
+	! cmp -s -i "0:$((2048 * 512))" -n "${fip_bytes}" "${fip}" "${boot0}"; then
+	die "${boot0} does not read back as ${fip##*/}; the eMMC will not boot"
+fi
+info "${boot0} verified"
+
+# The image just written carries the SD bootloader in /boot/fip.bin, because that
+# is what a card has to boot and one image serves both media. On the eMMC nothing
+# reads that file - the BootROM takes boot0 - but leaving the two disagreeing
+# means the board boots one bootloader and shows you another, so put the eMMC one
+# in its place. A later u-boot package upgrade does exactly the same thing.
+info "pointing ${part1}:/fip.bin at the eMMC bootloader"
+cp "${fip}" "${mnt}/fip.bin" || die "could not update fip.bin on ${part1}"
+echo emmc > "${mnt}/sophgo-storage.txt" || warn "could not update sophgo-storage.txt on ${part1}"
+sync
 
 umount "${mnt}"
 

@@ -188,11 +188,12 @@ declare -g SOPHGO_CVI_PANEL="MIPI_panel_milkv_8hd"
 # Where the vendored cvitek board files live.
 declare -g SOPHGO_CVI_FILES_DIR="${SRC}/packages/sophgo-sg200x/u-boot"
 
-# Which medium the resulting image is meant to run from: "sd" or "emmc".
+# There is one image, and it runs from either medium.
 #
-# This is far more than a label. u-boot's cvitek.mk turns STORAGE_TYPE into
-# -DCONFIG_SD_BOOT or -DCONFIG_EMMC_SUPPORT, and cv181x-asic.h keys three things
-# off that:
+# That was not always true, and the reason it is worth spelling out is that the
+# two bootloaders really are different builds. u-boot's cvitek.mk turns
+# STORAGE_TYPE into -DCONFIG_SD_BOOT or -DCONFIG_EMMC_SUPPORT, and cv181x-asic.h
+# keys three things off that:
 #
 #   - CONFIG_BOOTCOMMAND. "sd" gets "run distro_bootcmd || run sdboot"; "emmc"
 #     gets "cvi_update || run distro_bootcmd || ...", where cvi_update is the
@@ -206,57 +207,36 @@ declare -g SOPHGO_CVI_FILES_DIR="${SRC}/packages/sophgo-sg200x/u-boot"
 #     distro_bootcmd only scans mmc 0.
 #   - the offsets in cvipart.h/imgs.h, which are per-storage files.
 #
-# It is a build-time switch on an ordinary board rather than a board of its own:
+# The build used to fork on a SOPHGO_CVI_STORAGE variable, producing one variant
+# per image, because of a single hazard: an eMMC-built bootloader sitting on a
+# card runs cvi_update on every boot, and _storage_update() in cmd/cvi_update.c
+# then fatloads fip.bin off that card and writes it into the eMMC boot partition
+# without asking - and returns 0, so the '||' never reaches distro_bootcmd. A
+# card carrying the wrong variant silently reflashes the eMMC instead of booting.
 #
-#   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge SOPHGO_CVI_STORAGE=emmc
+# What retires the fork is that cvi_update is gated on
+# update_magic == SD_UPDATE_MAGIC, the FSBL's "I booted from SD" flag, so the
+# hazard needs the *card* to be carrying the eMMC bootloader. Every image now
+# puts the SD bootloader in /boot/fip.bin - the only thing a BootROM opens by
+# that name - and the eMMC one beside it as fip-emmc.bin, which nothing boots.
+# The combination that bites cannot occur.
 #
-# and what comes out is an ordinary bootable Armbian image, just with the eMMC
-# bootloader in it. Getting it onto the eMMC is two writes rather than one,
-# because no disk image can describe the whole eMMC: the BootROM reads fip.bin
-# raw out of hardware boot partition 1 (/dev/mmcblkXboot0), a separate LUN that
-# is not part of the addressable device an .img covers. So dd alone leaves the
-# system in place and the board dead. /usr/sbin/sophgo-emmc-install, shipped in
-# every image of this family, does both halves from a running SD system.
+# Reaching the eMMC is still two writes rather than one, and that is physics
+# rather than policy: the BootROM reads fip.bin raw out of hardware boot
+# partition 1 (/dev/mmcblkXboot0), a separate LUN that is not part of the
+# addressable device an .img covers, so no image written to the eMMC can ever
+# boot on its own. /usr/sbin/sophgo-emmc-install, shipped in every image, does
+# both halves from a running card system and takes the eMMC bootloader from the
+# fip-emmc.bin the image carries.
 #
 # For a board with no bootable card to run that from, the same image can be
-# turned into a self-flashing installer card instead:
+# turned into a self-flashing installer card:
 #
-#   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge SOPHGO_CVI_STORAGE=emmc \
+#   ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge \
 #       ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer
 #
-# There used to be a milkv-duos-arm-emmc and a milkv-duos-riscv-emmc whose only
-# real content was this one line, which made four board files for two physical
-# boards. apply_cmdline_params_to_env() runs long before the config phase, so a
-# command-line assignment is in scope here; hence ${:-} rather than a plain
-# assignment.
-#
-# One image cannot serve both, which is why this still forks the build. An
-# eMMC-built bootloader runs cvi_update on every SD boot, and _storage_update()
-# in cmd/cvi_update.c fatloads fip.bin off the card and writes it into the eMMC
-# boot partition without asking - every Armbian image has a /fip.bin, so a plain
-# card boot would silently reflash the eMMC and then return 0, which also means
-# the '||' never reaches distro_bootcmd. The mmc renumbering above is the
-# smaller half of the problem.
-declare -g SOPHGO_CVI_STORAGE="${SOPHGO_CVI_STORAGE:-sd}"
-case "${SOPHGO_CVI_STORAGE}" in
-	sd | emmc) ;;
-	*) exit_with_error "SOPHGO_CVI_STORAGE must be 'sd' or 'emmc'" "${SOPHGO_CVI_STORAGE}" ;;
-esac
-
-# The board name no longer says which of the two an image is - that was the
-# point of dropping the -emmc board files - so the file name has to, or an SD
-# image and an eMMC one differ only in content and are trivially mixed up once
-# they are both sitting in output/images.
-#
-# It has to be a hook and it has to be this hook: EXTRA_IMAGE_SUFFIXES is
-# declared in main-config.sh well after this include is sourced, and consolidated
-# a few lines after extension_prepare_config runs. The 100_ prefix is what keeps
-# "-emmc" ahead of the installer extension's "-installer" - unprefixed hook
-# functions sort as 500_, so without it the suffixes would come out reversed.
-function extension_prepare_config__100_sophgo_sg200x_storage_suffix() {
-	[[ "${SOPHGO_CVI_STORAGE}" == "emmc" ]] || return 0
-	EXTRA_IMAGE_SUFFIXES+=("-emmc")
-}
+# That card is the one place the eMMC bootloader is deliberately booted from a
+# card, because triggering cvi_update is exactly the point of it.
 
 # The half of the vendored board files that is named after the core, and the
 # only thing in this file that differs between the two architectures.
@@ -363,11 +343,6 @@ declare -g -a SOPHGO_CVI_STORAGE_VARIANTS=(sd emmc)
 # at config time. This is the switch, called once per u-boot target from
 # pre_config_uboot_target below, and once here so the values are sane before any
 # build starts.
-#
-# SOPHGO_CVI_STORAGE is deliberately not touched. That one says which bootloader
-# goes into the *image*, and it is read long after the u-boot targets are done -
-# clobbering it here would leave it holding whichever variant happened to be
-# built last.
 function sophgo_sg200x_select_build_storage() {
 	declare storage="${1}"
 	declare -g SOPHGO_CVI_TARGET_STORAGE="${storage}"
@@ -377,11 +352,11 @@ function sophgo_sg200x_select_build_storage() {
 	declare -g BOOTCONFIG="cvitek_${SOPHGO_CVI_PROJECT}_defconfig"
 }
 
-# Seeded from the first variant rather than from SOPHGO_CVI_STORAGE, and that is
-# deliberate: the package holds both bootloaders now, so its content does not
-# depend on which storage the image is for. BOOTCONFIG is the first entry in
-# artifact-uboot.sh's vars_to_hash, so deriving it from SOPHGO_CVI_STORAGE would
-# hand out two artifact versions for one byte-identical .deb.
+# Seeded from the first variant, and nothing about the build depends on which
+# one that is: the package holds both bootloaders, so a build has no "storage"
+# to be for any more. It matters only that this is a constant, because BOOTCONFIG
+# is the first entry in artifact-uboot.sh's vars_to_hash and anything varying
+# here would hand out several artifact versions for one byte-identical .deb.
 sophgo_sg200x_select_build_storage "${SOPHGO_CVI_STORAGE_VARIANTS[0]}"
 
 # One entry per storage variant, newline-separated:
@@ -760,25 +735,6 @@ function post_create_partitions__sophgo_sg200x_boot_partition_flags() {
 #   . /usr/lib/u-boot/platform_install.sh && write_uboot_platform "${DIR}" /dev/mmcblk2
 declare -g FORCE_UBOOT_UPDATE="yes"
 
-# The package holds both bootloaders, so this is not "which one is in here" - it
-# is which one the *image* being built wants. write_uboot_platform() needs it
-# only during an image build, where there is no medium underneath to ask; on a
-# real board it reads the medium instead and ignores this.
-#
-# It cannot be recovered from either fip.bin: U-Boot is LZMA-compressed inside,
-# so not even the CONFIG_BOOTCOMMAND string survives to grep for. That is also
-# why the two are told apart by filename in the package rather than by content.
-#
-# ${uboottempdir} and ${uboot_name} are locals of the packaging function this
-# hook is called from; the other boards using this hook reach for them the same
-# way. ${uboot_name} rather than a reconstructed "linux-u-boot-${BRANCH}-${BOARD}"
-# because it is the same variable that becomes DIR in platform_install.sh, which
-# is where write_uboot_platform() will look for the stamp.
-function pre_package_uboot_image__sophgo_sg200x_stamp_storage() {
-	display_alert "Sophgo SG200x" "stamping u-boot package as '${SOPHGO_CVI_STORAGE}'" "info"
-	echo "${SOPHGO_CVI_STORAGE}" > "${uboottempdir}/usr/lib/${uboot_name}/sophgo-storage.txt"
-}
-
 # The BootROM has two entirely different ideas of where the bootloader lives, and
 # which one applies is a property of the medium, not of the file:
 #
@@ -833,19 +789,13 @@ function write_uboot_platform() {
 	# reflashes the eMMC from the card's own fip.bin and then returns 0, so
 	# distro_bootcmd is never reached.
 	#
-	# An image build has no medium yet, so the stamp decides instead. It is
-	# written into the package from SOPHGO_CVI_STORAGE, which is exactly "the
-	# storage this image is being built for".
+	# An image is always the SD one. There is one image now, not an SD image and
+	# an eMMC image, and the way it reaches an eMMC is that you boot it from a
+	# card first - so the bootloader it has to carry is the one a card boots.
+	# sophgo-emmc-install swaps in the eMMC one on the way past.
 	declare storage="${medium}"
 	if [[ "${medium}" == "image" ]]; then
-		storage=""
-		if [[ -f "${dir}/sophgo-storage.txt" ]]; then
-			storage="$(tr -d '[:space:]' < "${dir}/sophgo-storage.txt")"
-		fi
-		if [[ -z "${storage}" ]]; then
-			echo "sophgo-sg200x: package does not say which bootloader this image wants" >&2
-			return 1
-		fi
+		storage="sd"
 	fi
 
 	declare fip="${dir}/fip-${storage}.bin"
@@ -925,10 +875,22 @@ function write_uboot_platform() {
 	echo "sophgo-sg200x: installing the ${storage} fip.bin into ${bootdir}"
 	cp "${fip}" "${bootdir}/fip.bin" || rc=1
 
-	# Stamped beside the file it describes, so that sophgo-emmc-install can later
-	# tell which bootloader an image or a running system carries. What is recorded
-	# is what was just installed, not what the package was built for - with both
-	# variants in the package those are no longer the same thing.
+	# The eMMC bootloader goes in beside it under its own name, on every medium.
+	# Nothing boots it from here - the BootROM only ever opens "fip.bin" - but it
+	# is what lets an eMMC be flashed from a plain FAT partition: both
+	# sophgo-emmc-install and the installer-card extension read it out of /boot
+	# rather than having to reach into an ext4 rootfs for it. Carrying it on the
+	# card too is what makes one image serve both media.
+	if [[ -f "${dir}/fip-emmc.bin" ]]; then
+		cp "${dir}/fip-emmc.bin" "${bootdir}/fip-emmc.bin" || rc=1
+	else
+		echo "sophgo-sg200x: no fip-emmc.bin in ${dir}; this medium cannot flash an eMMC" >&2
+		rc=1
+	fi
+
+	# Which variant fip.bin is. Informational now that nothing has to refuse a
+	# mismatch, but it is the only way to tell from the outside, and
+	# sophgo-emmc-install reports it.
 	echo "${storage}" > "${bootdir}/sophgo-storage.txt" || rc=1
 	sync
 
