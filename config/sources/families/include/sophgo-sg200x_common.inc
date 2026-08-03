@@ -166,8 +166,12 @@ declare -g SOPHGO_CVI_CHIP_ARCH="CV181X"
 declare -g SOPHGO_CVI_DDR_CFG="ddr3_1866_x16"
 declare -g SOPHGO_CVI_PANEL="MIPI_panel_milkv_8hd"
 
-# Where the vendored cvitek board files live.
-declare -g SOPHGO_CVI_FILES_DIR="${SRC}/packages/sophgo-sg200x/u-boot"
+# Where the vendored cvitek board files live. Under the U-Boot patch directory,
+# beside the patches, because they are the same kind of thing - modifications to
+# the U-Boot sources - and because artifact-uboot.sh hashes every file under
+# BOOTPATCHDIR into the u-boot artifact version. Editing one of these is then a
+# new package rather than a cache hit on the old one.
+declare -g SOPHGO_CVI_FILES_DIR="${SRC}/patch/u-boot/${BOOTPATCHDIR}/cvitek-board-files"
 
 # There is one image, and it runs from either medium.
 #
@@ -298,8 +302,8 @@ esac
 #
 # The vendor U-Boot does not build standalone: its board description lives in
 # the SDK, not in the U-Boot tree. Those files are vendored under
-# packages/sophgo-sg200x/u-boot/ and copied in below. See u-boot.md in the
-# milkv-duos-docs repo.
+# patch/u-boot/u-boot-sophgo-sg200x/cvitek-board-files/ and copied in below. See
+# u-boot.md in the milkv-duos-docs repo.
 
 # Both bootloaders are built, every time, and the package carries both. The
 # alternative - one variant per build - cannot survive contact with an apt repository.

@@ -52,7 +52,8 @@
 # The Sophgo U-Boot carries a 'cvi_update' command (cmd/cvi_update.c) which reads
 # files out of the FAT root of the SD card and writes them to the raw eMMC. In
 # U-Boot the card is mmc 1 and the eMMC is mmc 0; see the DTS comments in
-# packages/sophgo-sg200x/u-boot/*/dts/*_emmc.dts for how that numbering arises.
+# patch/u-boot/u-boot-sophgo-sg200x/cvitek-board-files/*/dts/*_emmc.dts for how
+# that numbering arises.
 #
 # What makes it fire is not a file on the card but how the bootloader was built.
 # cvitek.mk turns STORAGE_TYPE=emmc into -DCONFIG_EMMC_SUPPORT, and
@@ -131,7 +132,7 @@ function post_build_image__900_sophgo_emmc_installer() {
 	declare image_file="${DESTIMG}/${version}.img"
 	[[ -f "${image_file}" ]] || exit_with_error "image not found" "${image_file}"
 
-	declare mkcimg="${SRC}/packages/sophgo-sg200x/tools/mkcimg.py"
+	declare mkcimg="${SRC}/extensions/image-output-sophgo-emmc-installer/mkcimg.py"
 	[[ -f "${mkcimg}" ]] || exit_with_error "mkcimg.py not found" "${mkcimg}"
 
 	# Work area for the two files that end up in the FAT root, plus the installer
@@ -179,8 +180,8 @@ function post_build_image__900_sophgo_emmc_installer() {
 		"${work}/sophgo-storage.txt" ::/sophgo-storage.txt
 
 	# armbian.emmc: the name cvi_update looks for, from imgs.h in
-	# packages/sophgo-sg200x/u-boot/*/include/emmc/. Offset 0 - the image starts
-	# with its own MBR and owns the whole device.
+	# patch/u-boot/u-boot-sophgo-sg200x/cvitek-board-files/*/include/emmc/.
+	# Offset 0 - the image starts with its own MBR and owns the whole device.
 	display_alert "${EXTENSION}" "wrapping $(( $(stat -c %s "${image_file}") / 1024 / 1024 ))MB image in CIMG" "info"
 	run_host_command_logged python3 "${mkcimg}" \
 		--offset 0 --label ROOTFS \
