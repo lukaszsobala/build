@@ -207,8 +207,8 @@ mount -o ro "${part1}" "${mnt}" || die "could not mount ${part1}"
 fip="${mnt}/fip.bin"
 [[ -s "${fip}" ]] || die "no fip.bin in the image's boot partition; this is not a Sophgo SG200x image"
 
-# Which bootloader variant this is, stamped at build time by
-# post_write_uboot_platform__sophgo_sg200x_install_fip. An SD fip.bin in boot0
+# Which bootloader variant this is, stamped beside fip.bin by
+# write_uboot_platform() when the image was built. An SD fip.bin in boot0
 # leaves the board unbootable from eMMC - cv181x_asic_sd.dtsi deletes the eMMC
 # node, so U-Boot finds no storage at all - and there is no way to tell the two
 # apart from the file itself, since U-Boot is LZMA-compressed inside it.

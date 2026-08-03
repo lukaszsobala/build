@@ -207,8 +207,7 @@ function post_build_image__900_sophgo_emmc_installer() {
 	run_host_command_logged mkdir -p "${work}"
 
 	# fip.bin is taken out of the image's own FAT partition, where
-	# post_write_uboot_platform__sophgo_sg200x_install_fip put it, rather than
-	# hunted down in output/debs. Several u-boot .debs for one BOARD/BRANCH can
+	# write_uboot_platform() put it, rather than hunted down in output/debs. Several u-boot .debs for one BOARD/BRANCH can
 	# coexist there - one per artifact hash - and picking among them by name
 	# risks shipping a bootloader from an earlier configuration.
 	#

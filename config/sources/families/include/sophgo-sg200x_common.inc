@@ -673,35 +673,204 @@ function post_create_partitions__sophgo_sg200x_boot_partition_flags() {
 	run_host_command_logged sfdisk --activate "${SDCARD}.raw" 1
 }
 
-# Nothing to dd onto raw sectors: the BootROM reads fip.bin as a file from the
-# FAT partition, not from a fixed offset. write_uboot_platform() only gets a
-# block device, so the copy happens in the hook below instead.
-function write_uboot_platform() {
-	return 0
+# ---------------------------------------------------------------------------
+# Bootloader installation
+# ---------------------------------------------------------------------------
+
+# Makes the u-boot package's postinst call write_uboot_platform() below, so that
+# installing linux-u-boot-<board>-<branch> actually replaces the bootloader on a
+# running board instead of only dropping a new fip.bin under /usr/lib.
+#
+# Off by default across the tree, and usually rightly so: on a board whose
+# bootloader lives in raw sectors, a write during an unattended apt upgrade is a
+# brick waiting for the next power cut. Here the calculus is the other way round.
+# The eMMC bootloader sits in a hardware boot partition that no .img, no file
+# copy and no write to the block device can reach, so the alternative is not
+# "nothing happens", it is "the user hand-types dd against /dev/mmcblkXboot0" -
+# and getting *that* wrong is what actually bricks the board.
+#
+# Read board-side out of /etc/armbian-release, which armbian-bsp-cli writes. A
+# board installed before this landed therefore needs its BSP package updated
+# before its u-boot postinst starts doing anything; until then the same work is
+# one line by hand:
+#
+#   . /usr/lib/u-boot/platform_install.sh && write_uboot_platform "${DIR}" /dev/mmcblk2
+declare -g FORCE_UBOOT_UPDATE="yes"
+
+# Which of the two bootloaders this package holds, stamped in next to fip.bin so
+# that write_uboot_platform() can refuse to install one onto the other's medium.
+# It cannot be recovered from the file itself: U-Boot is LZMA-compressed inside
+# fip.bin, so not even the CONFIG_BOOTCOMMAND string survives to grep for.
+#
+# ${uboottempdir} and ${uboot_name} are locals of the packaging function this
+# hook is called from; the other boards using this hook reach for them the same
+# way. ${uboot_name} rather than a reconstructed "linux-u-boot-${BRANCH}-${BOARD}"
+# because it is the same variable that becomes DIR in platform_install.sh, which
+# is where write_uboot_platform() will look for the stamp.
+function pre_package_uboot_image__sophgo_sg200x_stamp_storage() {
+	display_alert "Sophgo SG200x" "stamping u-boot package as '${SOPHGO_CVI_STORAGE}'" "info"
+	echo "${SOPHGO_CVI_STORAGE}" > "${uboottempdir}/usr/lib/${uboot_name}/sophgo-storage.txt"
 }
 
-# Only fires when a bootloader was actually built (BOOTCONFIG != none). Runs
-# with ${MOUNT} still mounted, and is handed the extracted u-boot package as
-# UBOOT_CHROOT_DIR.
-function post_write_uboot_platform__sophgo_sg200x_install_fip() {
-	declare fip="${UBOOT_CHROOT_DIR}/fip.bin"
+# The BootROM has two entirely different ideas of where the bootloader lives, and
+# which one applies is a property of the medium, not of the file:
+#
+#   SD    fip.bin is read as a *file*, by name, from the first FAT partition.
+#   eMMC  fip.bin is read raw out of hardware boot partition 1 - mmcblkXboot0, a
+#         separate LUN that is not part of the addressable disk - at sector 0,
+#         with a backup at sector 2048.
+#
+# So this does both: the file copy always, and the raw write when the target is
+# an eMMC. The raw half is the whole reason this function exists. It used to be
+# "return 0" with a note that there was nothing to dd onto raw sectors, which was
+# true of the SD card and quietly wrong about the eMMC, and the consequence was
+# that installing the u-boot package on an eMMC board updated nothing at all -
+# the postinst ran, /usr/lib got a new fip.bin, and the board went on booting the
+# old bootloader out of boot0 with no indication anywhere that it had.
+#
+# Called three ways and has to behave in all of them:
+#
+#   image build      from write_uboot_to_loop_image(), with a loop device whose
+#                    partitions are already mounted (${MOUNT}/boot). No boot0, so
+#                    the raw half is skipped and this does what the old
+#                    post_write_uboot_platform hook used to do.
+#   package install  from uboot_postinst_base(), with the running root's disk.
+#   armbian-install  from platform_install.sh, likewise.
+#
+# Comments inside the body are dropped by the `declare -f` that copies this into
+# the package, so the explanations stay out here.
+function write_uboot_platform() {
+	declare dir="${1}" device="${2}"
+	declare fip="${dir}/fip.bin"
+	declare devname="${device##*/}"
+	declare rc=0
 
 	if [[ ! -f "${fip}" ]]; then
-		display_alert "Sophgo SG200x" "no fip.bin in the u-boot package - image will NOT boot" "wrn"
-		return 0
+		echo "sophgo-sg200x: no fip.bin in ${dir}; there is no bootloader here to install" >&2
+		return 1
 	fi
 
-	display_alert "Sophgo SG200x" "installing built fip.bin -> /boot/fip.bin" "info"
-	run_host_command_logged cp -v "${fip}" "${MOUNT}/boot/fip.bin"
+	declare pkg_storage=""
+	if [[ -f "${dir}/sophgo-storage.txt" ]]; then
+		pkg_storage="$(tr -d '[:space:]' < "${dir}/sophgo-storage.txt")"
+	fi
 
-	# Stamp which of the two bootloaders this is, next to the file it describes.
-	# Nothing at boot reads it; sophgo-emmc-install does, to refuse putting an SD
-	# fip.bin into the eMMC boot partition - that one has cv-emmc@4300000 deleted
-	# from its device tree, so it comes up with no eMMC and nothing to boot. The
-	# two cannot be told apart from the file: U-Boot is LZMA-compressed inside
-	# fip.bin, so not even the CONFIG_BOOTCOMMAND string survives to grep for.
-	display_alert "Sophgo SG200x" "stamping /boot/sophgo-storage.txt as '${SOPHGO_CVI_STORAGE}'" "info"
-	echo "${SOPHGO_CVI_STORAGE}" > "${MOUNT}/boot/sophgo-storage.txt"
+	# An eMMC has a boot0; a card has not, and neither has the loop device an
+	# image build hands us.
+	declare boot0="/dev/${devname}boot0"
+	declare medium="sd"
+	if [[ -b "${boot0}" ]]; then
+		medium="emmc"
+	elif [[ "${devname}" == loop* ]]; then
+		medium="image"
+	fi
+
+	# Installing the wrong variant is silently fatal in both directions. The SD
+	# bootloader's device tree deletes cv-emmc@4300000, so from boot0 it comes up
+	# with no eMMC and nothing to boot from; the eMMC one runs cvi_update first,
+	# which on a card boot reflashes the eMMC from the card's own fip.bin and then
+	# returns 0, so distro_bootcmd is never reached. An image build is exempt -
+	# the .img is whatever it was built to be, and there is no medium yet.
+	if [[ -z "${pkg_storage}" ]]; then
+		echo "sophgo-sg200x: package does not say which storage it was built for; assuming ${medium}" >&2
+	elif [[ "${medium}" != "image" && "${pkg_storage}" != "${medium}" ]]; then
+		echo "sophgo-sg200x: this package holds the '${pkg_storage}' bootloader, but ${device} is ${medium}." >&2
+		echo "sophgo-sg200x: leaving the bootloader alone - nothing is wrong and the board still boots." >&2
+		echo "sophgo-sg200x: to update it, install the '${medium}' build of this package (SOPHGO_CVI_STORAGE=${medium})." >&2
+		if [[ "${medium}" == "emmc" ]]; then
+			echo "sophgo-sg200x: Armbian's repository only ships the 'sd' one, so that build has to be your own." >&2
+		fi
+		return 1
+	fi
+
+	# Byte for byte what _storage_update() in cmd/cvi_update.c of the vendor
+	# U-Boot does, and what sophgo-emmc-install does. PARTITION_CONFIG in the
+	# ext_csd is deliberately not touched: the vendor flasher does not touch it
+	# either, so a board it does not already boot on is not one this could rescue.
+	if [[ "${medium}" == "emmc" ]]; then
+		declare force_ro="/sys/block/${devname}boot0/force_ro"
+		declare fip_bytes boot0_bytes
+		fip_bytes="$(stat -c %s "${fip}")"
+		boot0_bytes="$(blockdev --getsize64 "${boot0}")"
+
+		# The backup copy goes a megabyte in, so boot0 has to hold that much plus
+		# the file. Every eMMC on this board has 4MiB there, but a truncated second
+		# copy is the kind of thing that boots today and not after the next power cut.
+		if [[ $((2048 * 512 + fip_bytes)) -gt "${boot0_bytes}" ]]; then
+			echo "sophgo-sg200x: ${boot0} is only $((boot0_bytes / 1024))KB; ${fip_bytes} bytes at sector 2048 will not fit" >&2
+			return 1
+		fi
+		if [[ ! -w "${force_ro}" ]]; then
+			echo "sophgo-sg200x: cannot write ${force_ro}; ${boot0} stays read-only" >&2
+			return 1
+		fi
+
+		echo "sophgo-sg200x: installing fip.bin into ${boot0} (sectors 0 and 2048)"
+		echo 0 > "${force_ro}" || return 1
+		dd if="${fip}" of="${boot0}" bs=512 seek=0 conv=fsync status=none || rc=1
+		dd if="${fip}" of="${boot0}" bs=512 seek=2048 conv=fsync status=none || rc=1
+		sync
+		echo 1 > "${force_ro}" || echo "sophgo-sg200x: could not restore read-only on ${boot0}" >&2
+
+		# Read both copies back rather than trusting dd's exit status. The package
+		# postinst that calls this runs under `set +e` and always exits 0, so a
+		# failed write would otherwise be indistinguishable from a successful
+		# install - which is the exact failure this function exists to remove.
+		if [[ "${rc}" -eq 0 ]]; then
+			cmp -s -n "${fip_bytes}" "${fip}" "${boot0}" || rc=1
+			cmp -s -i "0:$((2048 * 512))" -n "${fip_bytes}" "${fip}" "${boot0}" || rc=1
+		fi
+
+		if [[ "${rc}" -ne 0 ]]; then
+			echo "sophgo-sg200x: FAILED to write ${boot0}; the eMMC bootloader was NOT updated" >&2
+			return 1
+		fi
+		echo "sophgo-sg200x: ${boot0} verified against the packaged fip.bin"
+	fi
+
+	# The FAT partition the BootROM reads on an SD boot, and where
+	# sophgo-emmc-install looks for the pair of files on either. Already mounted in
+	# both real cases - at ${MOUNT}/boot during an image build, at /boot on a
+	# running board - so ask where rather than assuming either one.
+	declare part1="${device}p1"
+	[[ -b "${part1}" ]] || part1="${device}1"
+	if [[ ! -b "${part1}" ]]; then
+		echo "sophgo-sg200x: no first partition on ${device}; nowhere to put fip.bin" >&2
+		return 1
+	fi
+
+	declare bootdir="" tmpmnt=""
+	bootdir="$(findmnt --first-only --noheadings --output TARGET --source "${part1}" 2> /dev/null)" || bootdir=""
+	if [[ -z "${bootdir}" ]]; then
+		tmpmnt="$(mktemp -d)" || return 1
+		if ! mount "${part1}" "${tmpmnt}"; then
+			rmdir "${tmpmnt}"
+			echo "sophgo-sg200x: could not mount ${part1}" >&2
+			return 1
+		fi
+		bootdir="${tmpmnt}"
+	fi
+
+	echo "sophgo-sg200x: installing fip.bin into ${bootdir}"
+	cp "${fip}" "${bootdir}/fip.bin" || rc=1
+
+	# Stamped beside the file it describes, so that sophgo-emmc-install can later
+	# tell which bootloader an image or a running system carries.
+	if [[ -n "${pkg_storage}" ]]; then
+		echo "${pkg_storage}" > "${bootdir}/sophgo-storage.txt" || rc=1
+	fi
+	sync
+
+	if [[ -n "${tmpmnt}" ]]; then
+		umount "${tmpmnt}" || rc=1
+		rmdir "${tmpmnt}" 2> /dev/null || true
+	fi
+
+	if [[ "${rc}" -ne 0 ]]; then
+		echo "sophgo-sg200x: FAILED to install fip.bin into ${bootdir}" >&2
+	fi
+
+	return "${rc}"
 }
 
 # ---------------------------------------------------------------------------
