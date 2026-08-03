@@ -6,35 +6,11 @@
 # runs at a time. Which one is chosen by the slide switch on the board, which is
 # what brings that core out of reset and runs the BootROM on it.
 #
-# So writing this image is only half of it: the switch has to be in the ARM
-# position as well. fip.bin is built for one architecture and says so in its TOC
-# header (0xAA640001 here, 0xC906B001 for RISC-V), and the BootROM will not load
-# the wrong one - a mismatch does not boot at all, with no message to say why.
+# Two board files for one physical board, because BOARD is the build target and
+# each produces a different image. One image runs from either medium (SD or eMMC).
 # The first line of the boot log is the quickest way to tell which core you are
 # actually on: it starts with 'B' for ARM and 'C' for RISC-V.
 #
-# Two board files for one physical board, because BOARD is the build target and
-# each produces a different image. They stay deliberately thin - everything the
-# two share (zram tuning, SERIALCON, kernel branches, bootloader, boot script)
-# is in the family, which is why only BOARDFAMILY below differs from
-# milkv-duos-riscv. The bootloader is built from source; see
-# config/sources/families/include/sophgo-sg200x_common.inc.
-#
-# One image runs from either medium; there is no separate eMMC build. It carries
-# both bootloaders - /boot/fip.bin, the SD one the BootROM opens by that name,
-# and /boot/fip-emmc.bin beside it - and sophgo-emmc-install uses the second when
-# writing the image onto the eMMC from a running card system. It has to: the
-# BootROM reads the bootloader out of the eMMC hardware boot partition, the one
-# part of the eMMC a disk image cannot describe, and without which the board will
-# not boot. ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer turns the same
-# image into a self-flashing card instead, for when there is no system to install
-# from.
-#
-# There is deliberately no SRC_CMDLINE. It is read only on the extlinux path and
-# when the boot script is a .template, and this family uses neither: console,
-# earlycon, verbosity and root device all come from /boot/armbianEnv.txt, which
-# the family's BOOTENV_FILE seeds. Setting it here would look like it worked and
-# do nothing.
 #
 # https://milkv.io/duo-s
 BOARD_NAME="Milk-V Duo S"
@@ -43,19 +19,14 @@ BOARDFAMILY="sophgo-sg200x-arm64"
 BOARD_MAINTAINER="lukaszsobala"
 INTRODUCED="2024"
 KERNEL_TARGET="edge,bleedingedge"
-# Only edge is worth gating on: bleedingedge tracks a release candidate and is
-# expected to break whenever it moves.
 KERNEL_TEST_TARGET="edge"
 BOOT_FDT_FILE="sophgo/sg2000-milkv-duo-s.dtb"
 # The silicon could in principle drive a panel through pins on the GPIO
 # headers, but no device tree we ship enables any of it, so every image is
-# serial-console only. Board level rather than family, because the build-list
-# inventory reads board files and would otherwise schedule desktop images.
+# declared headless.
 HAS_VIDEO_OUTPUT="no"
 
-# 512MB of RAM does not go far; keep the userspace lean. PACKAGE_LIST_BOARD*
-# is made readonly right after this file is sourced, so it cannot move into the
-# family include even though both variants want the same thing.
+# Because 512MB of RAM does not go far.
 PACKAGE_LIST_BOARD_REMOVE="snapd cloud-init"
 
 enable_extension "sophgo-sg200x-aic8800"

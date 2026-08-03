@@ -55,18 +55,8 @@ case "${BRANCH}" in
 		declare -g LINUXCONFIG="linux-${LINUXFAMILY}-edge"
 		;;
 
-	# Bleeding edge follows the current release candidate, so it moves; that is
-	# the point of the branch. The tag has to be pinned here rather than left to
-	# the framework, because the framework only knows one rc at a time:
-	# config/sources/mainline-kernel.conf.sh names whichever rc it was last
-	# bumped to (7.1-rc7 in this tree), and for anything else its 900_defaults
-	# hook falls back to branch:linux-7.2.y - a stable branch that does not exist
-	# until 7.2 is released, so the fetch would simply fail. Setting KERNELBRANCH
-	# here wins outright: common.conf only calls the mainline_kernel_decide_version
-	# hooks when it is empty.
-	#
-	# Bump the tag by hand as rcs land. Once 7.2 is out, drop the pin entirely and
-	# the stable branch takes over on its own.
+	# Bleeding edge follows the current release candidate, so it moves;
+	# once 7.2 is out, the pin will be dropped.
 	bleedingedge)
 		declare -g KERNEL_MAJOR_MINOR="7.2"
 		declare -g KERNELBRANCH="tag:v7.2-rc5"
@@ -77,23 +67,14 @@ esac
 
 # One patch directory per kernel version, the way every other mainline family
 # does it. The series is otherwise identical between the two, so a new version
-# starts as a copy of the previous one: patches that have landed upstream are
-# deleted, the rest are refreshed. 7.0 additionally carries four backports that
-# 7.2 gets from upstream - the CV1800B DMA driver, upstream in 7.1, and the
-# SG2000 DT bindings, upstream in 7.2 - which is why the numbering in the 7.2
-# directory has gaps where 0001, 0003, 0024 and 0025 would be. Keeping the
-# numbers aligned across directories is deliberate: it makes the two series
-# diffable by filename.
+# starts as a copy of the previous one and is then edited to match the new kernel.
 declare -g KERNELPATCHDIR="archive/sophgo-sg200x-${KERNEL_MAJOR_MINOR}" # Don't use symlinks.
 
 # The AIC8800 Wi-Fi module is handled by the sophgo-sg200x-aic8800 extension, and
 # 512MB of RAM does not leave room to build the rest of Armbian's WiFi drivers.
 declare -g EXTRAWIFI="no"
 
-# Overlays are installed by the kernel package to /boot/dtb/sophgo/overlay/ and
-# named ${OVERLAY_PREFIX}-${name}.dtbo, which is the path boot.cmd builds. The
-# prefix is the SoC rather than the family, because the .dtso sources live in
-# arch/*/boot/dts/sophgo/overlay/ next to the board DTS they patch.
+# Overlays
 declare -g OVERLAY_PREFIX="sg2000"
 
 # ---------------------------------------------------------------------------
@@ -108,7 +89,7 @@ declare -g OVERLAY_PREFIX="sg2000"
 # Sophgo support at all (board/sophgo/ is riscv-only), and even its RISC-V
 # targets rely on a vendor FSBL to bring up the clocks and load U-Boot. So a
 # fip.bin is unavoidable; what we do is build the whole thing ourselves rather
-# than ship a prebuilt binary. See the U-Boot build section below for the chain.
+# than ship a prebuilt binary.
 declare -g BOOTSOURCE="https://github.com/sophgo/u-boot-2021.10"
 declare -g BOOTDIR="u-boot-sophgo-sg200x"
 declare -g BOOTBRANCH="commit:bb7496c2dfded43921695bf49c23da28381f8960" # sg200x-dev, 2026-06-30
@@ -319,24 +300,9 @@ esac
 # the SDK, not in the U-Boot tree. Those files are vendored under
 # packages/sophgo-sg200x/u-boot/ and copied in below. See u-boot.md in the
 # milkv-duos-docs repo.
-#
-# None of the three build with a modern toolchain untouched. binutils 2.38 split
-# zicsr and zifencei out of the base ISA, and each component needs a different
-# answer: a backported upstream fix for U-Boot and a pair of patches for the
-# FSBL, both under patch/, and a PLATFORM_RISCV_ISA override for OpenSBI, in
-# sophgo_sg200x_build_opensbi() below.
 
 # Both bootloaders are built, every time, and the package carries both. The
-# alternative - one variant per build, selected by SOPHGO_CVI_STORAGE - cannot
-# survive contact with an apt repository: the package is named
-# linux-u-boot-${BOARD}-${BRANCH} with no storage in it, and reversioning
-# flattens every artifact version to plain ${REVISION}, so the two variants are
-# the same name at the same version and only one of them can ever be published.
-# Building both means the one published package is correct on either medium, and
-# write_uboot_platform() picks by what the board actually booted from.
-#
-# The order here is the order of the UBOOT_TARGET_MAP entries below; the two are
-# indexed against each other by uboot_target_counter, so they must agree.
+# alternative - one variant per build - cannot survive contact with an apt repository.
 declare -g -a SOPHGO_CVI_STORAGE_VARIANTS=(sd emmc)
 
 # Everything that names a storage type has to be per-target rather than settled
@@ -352,9 +318,8 @@ function sophgo_sg200x_select_build_storage() {
 	declare -g BOOTCONFIG="cvitek_${SOPHGO_CVI_PROJECT}_defconfig"
 }
 
-# Seeded from the first variant, and nothing about the build depends on which
-# one that is: the package holds both bootloaders, so a build has no "storage"
-# to be for any more. It matters only that this is a constant, because BOOTCONFIG
+# The package holds both bootloaders.
+# It matters only that this is a constant, because BOOTCONFIG
 # is the first entry in artifact-uboot.sh's vars_to_hash and anything varying
 # here would hand out several artifact versions for one byte-identical .deb.
 sophgo_sg200x_select_build_storage "${SOPHGO_CVI_STORAGE_VARIANTS[0]}"
@@ -692,6 +657,7 @@ function sophgo_sg200x_build_opensbi() {
 
 # /boot is a FAT partition because the BootROM has to be able to read fip.bin
 # out of it. 128MiB matches the vendor image and leaves room for a few kernels.
+# Can be extended later if needed.
 declare -g BOOTFS_TYPE="fat"
 declare -g BOOTSIZE="128"
 

@@ -40,9 +40,7 @@ declare -g AIC8800_REF="commit:ccf8fd059f70384fae4878c1048603510c2df700"
 
 # Firmware comes from armbian-firmware, which every image installs; this repo
 # ships none. It used to carry Milk-V's own aicsemi build, a different one to
-# upstream's - but upstream's drives this chip just as well (verified on a Duo S:
-# 5 GHz association, iperf3 clean, no firmware errors), so the blobs are gone and
-# this is simply the path every other AIC8800 board already uses.
+# upstream's - but upstream's drives this chip just as well, so the blobs are gone.
 #
 # One variable because the path reaches the modules two different ways; see
 # custom_kernel_config below. It is also overridable at runtime, which is the easy
@@ -125,12 +123,7 @@ function custom_kernel_config__sophgo_sg200x_aic8800_modules() {
 
 # armbian-firmware provides the blobs and is installed well before this hook runs
 # (lib/functions/rootfs/distro-agnostic.sh). Nothing to do here but make sure they
-# are actually present: the driver opens them by absolute path with no fallback,
-# and when one is missing it retries forever, power-cycling the chip about every
-# 1.7s. That is what shipped in the 2026-07-28 arm64 test image, and it is a
-# miserable thing to debug from the far end - so fail the build instead.
-# INSTALL_ARMBIAN_FIRMWARE=no, or armbian/firmware reorganising the directory, are
-# the ways it can go missing.
+# are actually present.
 function post_family_tweaks__sophgo_sg200x_aic8800_firmware() {
 	declare fw_dir="${SDCARD}${AIC8800_FW_DIR}"
 
@@ -150,11 +143,7 @@ function post_family_tweaks__sophgo_sg200x_aic8800_firmware() {
 
 	# Blobs in the right place are only half of it: the path is compiled into the
 	# modules, so the kernel package installed here has to agree with the one they were
-	# built for. CONFIG_AIC_FW_PATH stands in for both routes into the modules - it and
-	# the vendor Makefile are driven from the same variable - and reading it back off the
-	# installed kernel is what catches a cached deb from an older AIC8800_FW_DIR. That is
-	# what shipped in the 2026-07-29 riscv64 eMMC image: firmware under aic8800D80,
-	# modules still opening aic8800D80-milkv, retry loop for the whole boot.
+	# built for.
 	declare kernel_config
 	for kernel_config in "${SDCARD}"/boot/config-*; do
 		[[ -f "${kernel_config}" ]] || continue

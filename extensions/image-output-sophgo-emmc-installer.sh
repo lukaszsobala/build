@@ -34,38 +34,20 @@
 # Linux, because nothing on the eMMC boots yet and the BootROM is what has to be
 # satisfied first. That something is the vendor bootloader, running off a card.
 #
-# This used to say the microSD slot and the eMMC are mutually exclusive, and that
+# At first it appeared that the microSD slot and the eMMC are mutually exclusive, and that
 # a running system never sees both. That is wrong, and worth recording because it
 # shaped this whole extension. They are separate controllers - eMMC at 4300000,
-# card at 4310000 - and they coexist: the installer below reads its payload from
-# the card and writes the eMMC in one U-Boot session, and on an eMMC-booted arm64
-# image insertion and removal are both picked up automatically, mmcblk0 coming and
-# going while the eMMC keeps serving root. Every SD0 pad reads back in its native
-# function and the controller reports the card present, so there is no mux and
-# nothing to switch. Do give the card a few seconds: the controller probes
-# asynchronously and the scan runs on a work queue, so lsblk straight after
-# insertion can miss it.
+# card at 4310000 - and they coexist.
 #
 # The claim came from the vendor bootloader, where it is true by construction:
 # cv181x_asic_sd.dtsi does '/delete-node/ cv-emmc@4300000', so an SD build simply
 # has no eMMC in its device tree. A software choice in their U-Boot, not board
 # wiring, and it does not follow Linux.
 #
-# What that opened up is the armbian-install style route - boot a card, write the
+# This discovery opened up the armbian-install style route - boot a card, write the
 # eMMC from the running system, fip.bin into /dev/mmcblkXboot0 included. That is
 # now packages/bsp/sophgo-sg200x/usr/sbin/sophgo-emmc-install, and it is the
-# default route; the offsets it writes are read off _storage_update() below, so
-# the two agree by construction. Not yet run on hardware.
-#
-# What it does not open up is one image covering both by shipping the eMMC
-# bootloader everywhere - the obvious thing to try once the two are known to be
-# separate controllers, and still wrong.
-# _storage_update() in cmd/cvi_update.c fatloads fip.bin off the card and writes
-# it into the eMMC boot partition before checking anything, and every Armbian
-# image carries a /fip.bin - so an ordinary card boot would silently reflash the
-# eMMC. It then returns 0 whether or not it found a payload, so the '||' in
-# CONFIG_BOOTCOMMAND never reaches distro_bootcmd and nothing boots at all. That,
-# rather than the mmc renumbering, is why the build still forks in two.
+# default route.
 #
 # The Sophgo U-Boot carries a 'cvi_update' command (cmd/cvi_update.c) which reads
 # files out of the FAT root of the SD card and writes them to the raw eMMC. In
@@ -84,19 +66,9 @@
 # cvi_update checks. So an -emmc bootloader plus any SD boot means: flash.
 #
 # The installer and the installed system therefore share one fip.bin - the same
-# file cvi_update copies into the eMMC boot hardware partition. On a later boot
-# with no card, the boot source is the eMMC, the magic does not match, cvi_update
-# returns non-zero and the '||' falls through to distro_bootcmd, which finds
-# /boot.scr on the eMMC. With a card present the BootROM prefers the card and
-# the whole thing runs again - which is exactly why the install procedure
-# insists on removing it.
+# file cvi_update copies into the eMMC boot hardware partition.
 #
 # The payload is the entire Armbian disk image, MBR and all, written at offset 0.
-# _prgImage() writes each chunk to an absolute byte offset, so nothing forces us
-# into the vendor's BOOT/MISC/ENV/ROOTFS split - and staying out of it is what
-# keeps the boot script, apt kernel upgrades and first-boot resize working. The
-# vendor layout has no filesystem on /boot at all, just a raw FIT image.
-#
 # The installer this produces replaces ${version}.img, so it flows through the
 # rest of the pipeline as an ordinary image: fingerprinted, optionally written to
 # CARD_DEVICE, then xz'd and checksummed. It is not a bootable Armbian system and
@@ -105,33 +77,6 @@
 # and the payload, so the installer is the payload plus about a megabyte rather
 # than a second copy of anything.
 #
-# ARM vs RISC-V. Only the RISC-V side has been installed on real hardware, and
-# the vendor has never shipped an ARM eMMC image either - their package is the
-# cv1813h_milkv_duos_emmc project and its boot.emmc FIT says arch = "riscv". So
-# the ARM path is reasoned rather than observed. What was checked:
-#
-#   - setup_dl_flag() is in the shared bl2 (plat/cv181x/bl2/bl2_main.c) and runs
-#     unconditionally; CONFIG_CMD_CVI_UPDATE is "default y" with no arch
-#     dependency; BOOT_SOURCE_FLAG_ADDR comes from board/cvitek/cv181x/, which
-#     both arches share; cvi_board_memmap.h is byte-identical between them.
-#   - the mmc numbering is confirmed on ARM hardware. There are no mmc aliases
-#     in any of the DTS, so U-Boot numbers by node order, and an ARM SD boot
-#     prints "MMC: cv-sd@4310000: 0, wifi-sd@4320000: 1" - cv-emmc@4300000
-#     missing only because cv181x_asic_sd.dtsi deletes it. Keeping it puts it
-#     first, which is the split cvi_update assumes.
-#   - the per-arch base dtsi re-open cv-emmc/cv-sd only to patch interrupts
-#     (GIC_SPI against PLIC), which does not move them in the tree.
-#
-# What is inferred: that the boot-source flag survives bl31, where RISC-V has
-# OpenSBI instead. AXI_SRAM_SIZE is 0x40 - a 64-byte mailbox with allocated
-# slots, one of which (ATF_DBG_REG, +0xC) belongs to ATF, so ATF knows the
-# layout - and CVIMMAP_MONITOR_ADDR is 0x80000000, so bl31 runs from DRAM and
-# cannot clobber it in passing.
-#
-# If that inference is wrong the result is benign: cvi_update returns non-zero,
-# the '||' falls through to distro_bootcmd and nothing is written to the eMMC.
-# It fails to install rather than installing badly.
-#
 # Installation, for the record:
 #
 #   0. build it - the ordinary image, plus this extension by name:
@@ -139,7 +84,7 @@
 #        ./compile.sh build BOARD=milkv-duos-arm BRANCH=edge \
 #            ENABLE_EXTENSIONS=image-output-sophgo-emmc-installer
 #
-#      -> Armbian_..._Milkv-duos-arm_..._7.0.14-installer_minimal.img.xz.
+#      -> Armbian_..._Milkv-duos-arm_...-installer_minimal.img.xz.
 #      "-installer" comes from here; the board name is the same one the plain
 #      image uses.
 #
