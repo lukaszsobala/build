@@ -190,6 +190,18 @@ function post_family_tweaks__sophgo_sg200x_aic8800_modprobe() {
 	EOF
 }
 
+# The bsp-cli artifact hashes packages/bsp/common and packages/bsp/${LINUXFAMILY},
+# which covers the file the stable-MAC hook below installs but not the two the
+# Bluetooth hook takes out of the shared packages/bsp/aic8800 - no family name
+# reaches that directory. Hooks are hashed as source text only, so without this the
+# install lines below read the same after aic8800-bluetooth changes, the version
+# collides with the previous build, and the deb comes back out of the cache with the
+# old script in it.
+function extension_prepare_config__sophgo_sg200x_aic8800_hash_bsp_dir() {
+	declare -g -a BSP_CLI_EXTRA_HASH_DIRS
+	BSP_CLI_EXTRA_HASH_DIRS+=("${SRC}/packages/bsp/aic8800")
+}
+
 # The chip's Bluetooth side is a plain HCI H4 controller on uart4, already holding
 # the patch aic8800_bsp uploaded over SDIO - so all it needs is an hciattach at the
 # baud rate the patch table announces. These go into the BSP package rather than
