@@ -261,18 +261,17 @@ function extension_prepare_config__100_sophgo_sg200x_storage_suffix() {
 # The half of the vendored board files that is named after the core, and the
 # only thing in this file that differs between the two architectures.
 #
-# The _sd/_emmc suffix comes from SOPHGO_CVI_STORAGE above, so a board file
-# selects the whole set - defconfig, board DTS, imgs.h, cvipart.h - by setting
-# that one variable. It also feeds BOOTCONFIG, which is the first entry in
-# artifact-uboot.sh's vars_to_hash, so the two storage variants get distinct
-# u-boot artifact versions without touching that list.
+# Only the prefixes live here. The _sd/_emmc suffix that completes them - and
+# with it the defconfig, the board DTS, imgs.h and cvipart.h - is appended per
+# u-boot target by sophgo_sg200x_select_build_storage(), because both variants
+# are built on every run rather than one being chosen at config time.
 #
 # ARCH is set by the family file before this include is sourced.
 case "${ARCH}" in
 
 	arm64)
-		declare -g SOPHGO_CVI_PROJECT="sg2000_milkv_duos_glibc_arm64_${SOPHGO_CVI_STORAGE}"
-		declare -g SOPHGO_CVI_BOARD="milkv_duos_glibc_arm64_${SOPHGO_CVI_STORAGE}"
+		declare -g SOPHGO_CVI_PROJECT_PREFIX="sg2000_milkv_duos_glibc_arm64"
+		declare -g SOPHGO_CVI_BOARD_PREFIX="milkv_duos_glibc_arm64"
 		declare -g SOPHGO_CVI_FILES_VARIANT="arm64"
 		# U-Boot 2021.10 has no arch/arm64; aarch64 boards live under arch/arm.
 		declare -g SOPHGO_CVI_UBOOT_DTS_DIR="arch/arm/dts"
@@ -286,8 +285,8 @@ case "${ARCH}" in
 		# Note the musl project name: that is the SDK's own naming for the
 		# RISC-V build and has no bearing on the Armbian userspace, which is
 		# glibc either way.
-		declare -g SOPHGO_CVI_PROJECT="sg2000_milkv_duos_musl_riscv64_${SOPHGO_CVI_STORAGE}"
-		declare -g SOPHGO_CVI_BOARD="milkv_duos_musl_riscv64_${SOPHGO_CVI_STORAGE}"
+		declare -g SOPHGO_CVI_PROJECT_PREFIX="sg2000_milkv_duos_musl_riscv64"
+		declare -g SOPHGO_CVI_BOARD_PREFIX="milkv_duos_musl_riscv64"
 		declare -g SOPHGO_CVI_FILES_VARIANT="riscv64"
 		declare -g SOPHGO_CVI_UBOOT_DTS_DIR="arch/riscv/dts"
 		# "riscv", not "riscv64": both the SDK's CONFIG_ARCH and the FSBL
@@ -347,12 +346,58 @@ esac
 # FSBL, both under patch/, and a PLATFORM_RISCV_ISA override for OpenSBI, in
 # sophgo_sg200x_build_opensbi() below.
 
+# Both bootloaders are built, every time, and the package carries both. The
+# alternative - one variant per build, selected by SOPHGO_CVI_STORAGE - cannot
+# survive contact with an apt repository: the package is named
+# linux-u-boot-${BOARD}-${BRANCH} with no storage in it, and reversioning
+# flattens every artifact version to plain ${REVISION}, so the two variants are
+# the same name at the same version and only one of them can ever be published.
+# Building both means the one published package is correct on either medium, and
+# write_uboot_platform() picks by what the board actually booted from.
+#
+# The order here is the order of the UBOOT_TARGET_MAP entries below; the two are
+# indexed against each other by uboot_target_counter, so they must agree.
+declare -g -a SOPHGO_CVI_STORAGE_VARIANTS=(sd emmc)
+
+# Everything that names a storage type has to be per-target rather than settled
+# at config time. This is the switch, called once per u-boot target from
+# pre_config_uboot_target below, and once here so the values are sane before any
+# build starts.
+#
+# SOPHGO_CVI_STORAGE is deliberately not touched. That one says which bootloader
+# goes into the *image*, and it is read long after the u-boot targets are done -
+# clobbering it here would leave it holding whichever variant happened to be
+# built last.
+function sophgo_sg200x_select_build_storage() {
+	declare storage="${1}"
+	declare -g SOPHGO_CVI_TARGET_STORAGE="${storage}"
+	declare -g SOPHGO_CVI_PROJECT="${SOPHGO_CVI_PROJECT_PREFIX}_${storage}"
+	declare -g SOPHGO_CVI_BOARD="${SOPHGO_CVI_BOARD_PREFIX}_${storage}"
+	# The vendor defconfig is named after the SDK project.
+	declare -g BOOTCONFIG="cvitek_${SOPHGO_CVI_PROJECT}_defconfig"
+}
+
+# Seeded from the first variant rather than from SOPHGO_CVI_STORAGE, and that is
+# deliberate: the package holds both bootloaders now, so its content does not
+# depend on which storage the image is for. BOOTCONFIG is the first entry in
+# artifact-uboot.sh's vars_to_hash, so deriving it from SOPHGO_CVI_STORAGE would
+# hand out two artifact versions for one byte-identical .deb.
+sophgo_sg200x_select_build_storage "${SOPHGO_CVI_STORAGE_VARIANTS[0]}"
+
+# One entry per storage variant, newline-separated:
+# loop_over_uboot_targets_and_do() splits on newlines and runs the whole
+# per-target sequence - patch (which resets the tree), configure, make,
+# uboot_custom_postprocess, deploy - once for each. That is what gets two
+# bootloaders out of one source tree, and the reset between targets is what
+# keeps the per-storage cvipart.h/imgs.h from leaking across.
+#
+# The "src:dst" form in the third field renames the outputs apart in the .deb;
+# without it the second target would silently overwrite the first.
+#
 # Only u-boot.bin is a real make target; fip.bin is produced by
 # uboot_custom_postprocess() below and picked up from the same directory.
-declare -g UBOOT_TARGET_MAP=";;u-boot.bin fip.bin"
-
-# The vendor defconfig is named after the SDK project.
-declare -g BOOTCONFIG="cvitek_${SOPHGO_CVI_PROJECT}_defconfig"
+declare -g UBOOT_TARGET_MAP=";;u-boot.bin:u-boot-sd.bin fip.bin:fip-sd.bin
+;;u-boot.bin:u-boot-emmc.bin fip.bin:fip-emmc.bin"
 
 function fetch_custom_uboot__sophgo_sg200x_fsbl() {
 	display_alert "Sophgo SG200x" "fetching FSBL sources" "info"
@@ -416,6 +461,19 @@ function pre_config_uboot_target__sophgo_sg200x_board_files() {
 	declare files="${SOPHGO_CVI_FILES_DIR}"
 	declare variant="${SOPHGO_CVI_FILES_VARIANT}"
 
+	# Which of the two bootloaders this target is. uboot_target_counter is
+	# 1-based and comes from loop_over_uboot_targets_and_do(); the variant list
+	# and UBOOT_TARGET_MAP are indexed against each other, so a mismatch between
+	# them is a build bug rather than something to paper over.
+	declare storage="${SOPHGO_CVI_STORAGE_VARIANTS[$((uboot_target_counter - 1))]:-}"
+	[[ -n "${storage}" ]] ||
+		exit_with_error "sophgo-sg200x: no storage variant for u-boot target ${uboot_target_counter}" \
+			"SOPHGO_CVI_STORAGE_VARIANTS and UBOOT_TARGET_MAP disagree"
+	sophgo_sg200x_select_build_storage "${storage}"
+
+	display_alert "Sophgo SG200x" \
+		"u-boot target ${uboot_target_counter} of ${#SOPHGO_CVI_STORAGE_VARIANTS[@]}: ${storage} (${BOOTCONFIG})" "info"
+
 	display_alert "Sophgo SG200x" "installing cvitek board files (${variant})" "info"
 
 	run_host_command_logged cp -v "${files}/common/dts/"*.dtsi "${SOPHGO_CVI_UBOOT_DTS_DIR}/"
@@ -430,8 +488,8 @@ function pre_config_uboot_target__sophgo_sg200x_board_files() {
 	# files coexist there harmlessly, and CVIBOARD/BOOTCONFIG pick the pair that
 	# gets built. These two cannot work that way: the names are fixed, U-Boot
 	# #includes them unconditionally, and their contents are per-storage. The
-	# SDK generates them per project for the same reason.
-	declare storage="${SOPHGO_CVI_STORAGE}"
+	# SDK generates them per project for the same reason, and it is why the two
+	# bootloaders have to be built one after the other rather than side by side.
 	run_host_command_logged cp -v "${files}/${variant}/include/${storage}/cvipart.h" "include/"
 	run_host_command_logged cp -v "${files}/${variant}/include/${storage}/imgs.h" "include/"
 
@@ -456,7 +514,7 @@ function sophgo_sg200x_cvitek_env_array() {
 		"CHIP=${SOPHGO_CVI_CHIP}"
 		"CHIP_ARCH=${SOPHGO_CVI_CHIP_ARCH}"
 		"CVIBOARD=${SOPHGO_CVI_BOARD}"
-		"STORAGE_TYPE=${SOPHGO_CVI_STORAGE}"
+		"STORAGE_TYPE=${SOPHGO_CVI_TARGET_STORAGE}"
 		"PANEL_TUNING_PARAM=${SOPHGO_CVI_PANEL}"
 		"CONFIG_SKIP_RAMDISK=y"
 		"CONFIG_USE_DEFAULT_ENV=y"
@@ -536,7 +594,8 @@ function uboot_custom_postprocess() {
 		fsbl_monitor=("MONITOR_PATH=${SOPHGO_OPENSBI_FW_DYNAMIC}")
 	fi
 
-	display_alert "Sophgo SG200x" "building FSBL and packing fip.bin (OD_CLK_SEL=${od_clk_sel})" "info"
+	display_alert "Sophgo SG200x" \
+		"building FSBL and packing ${SOPHGO_CVI_TARGET_STORAGE} fip.bin (OD_CLK_SEL=${od_clk_sel})" "info"
 
 	# Which variables go through the environment and which on the command line
 	# is not cosmetic. The FSBL Makefile does
@@ -566,8 +625,8 @@ function uboot_custom_postprocess() {
 		"CHIP_ARCH=${SOPHGO_CVI_CHIP_ARCH}" \
 		"CHIP=${SOPHGO_CVI_CHIP}" \
 		"DDR_CFG=${SOPHGO_CVI_DDR_CFG}" \
-		"STORAGE=${SOPHGO_CVI_STORAGE}" \
-		"STORAGE_TYPE=${SOPHGO_CVI_STORAGE}" \
+		"STORAGE=${SOPHGO_CVI_TARGET_STORAGE}" \
+		"STORAGE_TYPE=${SOPHGO_CVI_TARGET_STORAGE}" \
 		"OD_CLK_SEL=${od_clk_sel}" \
 		"PROJECT_FULLNAME=${SOPHGO_CVI_PROJECT}" \
 		make -C "${SOPHGO_FSBL_DIR}" \
@@ -581,8 +640,12 @@ function uboot_custom_postprocess() {
 
 	[[ -f "${fsbl_out}/fip.bin" ]] || exit_with_error "FSBL did not produce fip.bin" "${fsbl_out}"
 
+	# Left under the plain name: UBOOT_TARGET_MAP's "fip.bin:fip-${storage}.bin"
+	# renames it on the way into the .deb, and the tree is reset before the next
+	# target anyway.
 	run_host_command_logged cp -v "${fsbl_out}/fip.bin" "${uboot_dir}/fip.bin"
-	display_alert "Sophgo SG200x" "fip.bin is $(stat -c %s "${uboot_dir}/fip.bin") bytes" "info"
+	display_alert "Sophgo SG200x" \
+		"${SOPHGO_CVI_TARGET_STORAGE} fip.bin is $(stat -c %s "${uboot_dir}/fip.bin") bytes" "info"
 }
 
 # RISC-V only. Builds the OpenSBI that goes in fip.bin's monitor slot, and sets
@@ -697,10 +760,14 @@ function post_create_partitions__sophgo_sg200x_boot_partition_flags() {
 #   . /usr/lib/u-boot/platform_install.sh && write_uboot_platform "${DIR}" /dev/mmcblk2
 declare -g FORCE_UBOOT_UPDATE="yes"
 
-# Which of the two bootloaders this package holds, stamped in next to fip.bin so
-# that write_uboot_platform() can refuse to install one onto the other's medium.
-# It cannot be recovered from the file itself: U-Boot is LZMA-compressed inside
-# fip.bin, so not even the CONFIG_BOOTCOMMAND string survives to grep for.
+# The package holds both bootloaders, so this is not "which one is in here" - it
+# is which one the *image* being built wants. write_uboot_platform() needs it
+# only during an image build, where there is no medium underneath to ask; on a
+# real board it reads the medium instead and ignores this.
+#
+# It cannot be recovered from either fip.bin: U-Boot is LZMA-compressed inside,
+# so not even the CONFIG_BOOTCOMMAND string survives to grep for. That is also
+# why the two are told apart by filename in the package rather than by content.
 #
 # ${uboottempdir} and ${uboot_name} are locals of the packaging function this
 # hook is called from; the other boards using this hook reach for them the same
@@ -728,6 +795,10 @@ function pre_package_uboot_image__sophgo_sg200x_stamp_storage() {
 # the postinst ran, /usr/lib got a new fip.bin, and the board went on booting the
 # old bootloader out of boot0 with no indication anywhere that it had.
 #
+# The two bootloaders are not interchangeable and the package carries both, so
+# the first thing this does is pick one - by medium on a real board, by the
+# package's stamp during an image build.
+#
 # Called three ways and has to behave in all of them:
 #
 #   image build      from write_uboot_to_loop_image(), with a loop device whose
@@ -741,19 +812,8 @@ function pre_package_uboot_image__sophgo_sg200x_stamp_storage() {
 # the package, so the explanations stay out here.
 function write_uboot_platform() {
 	declare dir="${1}" device="${2}"
-	declare fip="${dir}/fip.bin"
 	declare devname="${device##*/}"
 	declare rc=0
-
-	if [[ ! -f "${fip}" ]]; then
-		echo "sophgo-sg200x: no fip.bin in ${dir}; there is no bootloader here to install" >&2
-		return 1
-	fi
-
-	declare pkg_storage=""
-	if [[ -f "${dir}/sophgo-storage.txt" ]]; then
-		pkg_storage="$(tr -d '[:space:]' < "${dir}/sophgo-storage.txt")"
-	fi
 
 	# An eMMC has a boot0; a card has not, and neither has the loop device an
 	# image build hands us.
@@ -765,21 +825,32 @@ function write_uboot_platform() {
 		medium="image"
 	fi
 
-	# Installing the wrong variant is silently fatal in both directions. The SD
-	# bootloader's device tree deletes cv-emmc@4300000, so from boot0 it comes up
-	# with no eMMC and nothing to boot from; the eMMC one runs cvi_update first,
-	# which on a card boot reflashes the eMMC from the card's own fip.bin and then
-	# returns 0, so distro_bootcmd is never reached. An image build is exempt -
-	# the .img is whatever it was built to be, and there is no medium yet.
-	if [[ -z "${pkg_storage}" ]]; then
-		echo "sophgo-sg200x: package does not say which storage it was built for; assuming ${medium}" >&2
-	elif [[ "${medium}" != "image" && "${pkg_storage}" != "${medium}" ]]; then
-		echo "sophgo-sg200x: this package holds the '${pkg_storage}' bootloader, but ${device} is ${medium}." >&2
-		echo "sophgo-sg200x: leaving the bootloader alone - nothing is wrong and the board still boots." >&2
-		echo "sophgo-sg200x: to update it, install the '${medium}' build of this package (SOPHGO_CVI_STORAGE=${medium})." >&2
-		if [[ "${medium}" == "emmc" ]]; then
-			echo "sophgo-sg200x: Armbian's repository only ships the 'sd' one, so that build has to be your own." >&2
+	# Which of the two bootloaders in this package to install. On a real board
+	# that is decided by what is underneath us, which is the entire point of
+	# carrying both: the wrong variant is silently fatal in either direction - the
+	# SD one's device tree deletes cv-emmc@4300000, so from boot0 it finds no eMMC
+	# at all, and the eMMC one runs cvi_update first, which on a card boot
+	# reflashes the eMMC from the card's own fip.bin and then returns 0, so
+	# distro_bootcmd is never reached.
+	#
+	# An image build has no medium yet, so the stamp decides instead. It is
+	# written into the package from SOPHGO_CVI_STORAGE, which is exactly "the
+	# storage this image is being built for".
+	declare storage="${medium}"
+	if [[ "${medium}" == "image" ]]; then
+		storage=""
+		if [[ -f "${dir}/sophgo-storage.txt" ]]; then
+			storage="$(tr -d '[:space:]' < "${dir}/sophgo-storage.txt")"
 		fi
+		if [[ -z "${storage}" ]]; then
+			echo "sophgo-sg200x: package does not say which bootloader this image wants" >&2
+			return 1
+		fi
+	fi
+
+	declare fip="${dir}/fip-${storage}.bin"
+	if [[ ! -f "${fip}" ]]; then
+		echo "sophgo-sg200x: no ${fip##*/} in ${dir}; this package has no ${storage} bootloader" >&2
 		return 1
 	fi
 
@@ -851,14 +922,14 @@ function write_uboot_platform() {
 		bootdir="${tmpmnt}"
 	fi
 
-	echo "sophgo-sg200x: installing fip.bin into ${bootdir}"
+	echo "sophgo-sg200x: installing the ${storage} fip.bin into ${bootdir}"
 	cp "${fip}" "${bootdir}/fip.bin" || rc=1
 
 	# Stamped beside the file it describes, so that sophgo-emmc-install can later
-	# tell which bootloader an image or a running system carries.
-	if [[ -n "${pkg_storage}" ]]; then
-		echo "${pkg_storage}" > "${bootdir}/sophgo-storage.txt" || rc=1
-	fi
+	# tell which bootloader an image or a running system carries. What is recorded
+	# is what was just installed, not what the package was built for - with both
+	# variants in the package those are no longer the same thing.
+	echo "${storage}" > "${bootdir}/sophgo-storage.txt" || rc=1
 	sync
 
 	if [[ -n "${tmpmnt}" ]]; then
