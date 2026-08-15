@@ -5,8 +5,8 @@ Subject: [PATCH] cubie-a7s: add Radxa Cubie A7S device tree
 
 ---
  arch/arm64/boot/dts/allwinner/Makefile        |    2 +
- .../dts/allwinner/sun60i-a733-cubie-a7s.dts   | 2427 +++++++++++++++++
- 2 files changed, 2429 insertions(+)
+ .../dts/allwinner/sun60i-a733-cubie-a7s.dts   | 2209 +++++++++++++++++
+ 2 files changed, 2211 insertions(+)
  create mode 100644 arch/arm64/boot/dts/allwinner/sun60i-a733-cubie-a7s.dts
 
 diff --git a/arch/arm64/boot/dts/allwinner/Makefile b/arch/arm64/boot/dts/allwinner/Makefile
@@ -26,7 +26,7 @@ new file mode 100755
 index 0000000000..fa8980e0ff
 --- /dev/null
 +++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-cubie-a7s.dts
-@@ -0,0 +1,2158 @@
+@@ -0,0 +1,2209 @@
 +// SPDX-License-Identifier: (GPL-2.0+ or MIT)
 +
 +/dts-v1/;
@@ -139,7 +139,7 @@ index 0000000000..fa8980e0ff
 +		// aux_n = <&r_pio PL 11 GPIO_ACTIVE_HIGH>;
 +		phys = <&combo0_dp>, <&combo0_usb>;
 +		phy-names = "dp-phy", "usb-phy";
-+		dp_configure_delay = <20>;
++		dp_configure_delay = <50>;
 +		status = "okay";
 +
 +		mode-switch;
@@ -743,6 +743,13 @@ index 0000000000..fa8980e0ff
 +		function = "gpio_in";
 +	};
 +
++	husb311_int: husb311-int@0 {
++		pins = "PL3";
++		function = "gpio_in";
++		drive-strength = <10>;
++		bias-pull-up;
++	};
++
 +	s_irrx_pins_default: s_irrx@0 {
 +		pins = "PL4";
 +		function = "s_ir_rx";
@@ -1096,6 +1103,14 @@ index 0000000000..fa8980e0ff
 +
 +&serdes {
 +	serdes1v8-supply = <&reg_cldo5>;
++	/*
++	 * Do not let combo0 drive USB3 and DP at the same time. With the
++	 * combined mode enabled, combo0_usb_param_config() takes the
++	 * combo0_configure_usb_dp() path and the DP lanes never get the
++	 * standalone DP configuration, so alt mode brings up no link.
++	 * The orangepi A733 boards disable it for the same reason.
++	 */
++	udp-disable = <1>;
 +	status = "okay";
 +	combophy0: combo-phy0@6c01000 {
 +		lane_invert = <1 1 1 1>;
@@ -1104,7 +1119,7 @@ index 0000000000..fa8980e0ff
 +#else
 +		lane_remap = <2 3 0 1>;
 +#endif
-+		typec_remap = <2 3 0 1>;
++		typec_remap = <0 1 2 3>;
 +	};
 +};
 +
@@ -1724,8 +1739,12 @@ index 0000000000..fa8980e0ff
 +	pinctrl-0 = <&s_twi1_pins_default>;
 +	pinctrl-1 = <&s_twi1_pins_sleep>;
 +	pinctrl-names = "default", "sleep";
-+	/* For stability and backwards compatibility, we recommend setting ‘twi_drv_used’ to 1 */
-+	twi_drv_used = <1>;
++	/*
++	 * The TCPC is driven from hard-irq context during PD negotiation, so
++	 * use the CPU-driven TWI engine here like the orangepi A733 boards do
++	 * rather than the DMA "drv" engine.
++	 */
++	twi_drv_used = <0>;
 +	no_suspend = <1>;
 +	status = "okay";
 +
@@ -1733,7 +1752,15 @@ index 0000000000..fa8980e0ff
 +		compatible = "hynetek,husb311";
 +		reg = <0x4e>;
 +		interrupt-parent = <&r_pio>;
-+		husb311,intr_gpio = <&r_pio PL 3 IRQ_TYPE_LEVEL_LOW>;
++		/*
++		 * The BSP husb311 driver takes its IRQ from client->irq, which the
++		 * i2c core fills in from "interrupts". Without this property it falls
++		 * back to platform_get_irq(to_platform_device(dev)) on an i2c device
++		 * and oopses, so keep it even though the vendor dts omits it.
++		 */
++		interrupts = <PL 3 IRQ_TYPE_LEVEL_LOW>;
++		pinctrl-0 = <&husb311_int>;
++		pinctrl-names = "default";
 +		vbus-supply = <&reg_usb0_vbus>;
 +		/* aw,vbus-wakeup-quirk; */
 +		/* aw,port-reset-quirk; */
@@ -1837,10 +1864,34 @@ index 0000000000..fa8980e0ff
 +	edp_color_fmt = <0>;
 +	edp_ssc_en = <0>;
 +	edp_ssc_mode = <0>;
++	/*
++	 * The driver defaults this to 1, which rejects every mode above 61fps
++	 * in mode_valid(). Unlike the equivalent cap in sunxi_drm_hdmi.c, which
++	 * is hardcoded and needs a driver patch, this one is a DT knob, so turn
++	 * it off here. How far the limit actually lifts is bounded by the lane
++	 * budget below.
++	 */
++	fps_limit_60 = <0>;
 +
-+	edp_lane_rate = <1>;
-+	edp_lane_cnt = <4>;
++	/*
++	 * edp_lane_rate/edp_lane_cnt describe the source capability and are
++	 * intentionally left unset, matching the orangepi A733 boards: the
++	 * driver then defaults to 2.7G x2 and negotiates down against the
++	 * sink's DPCD. The blacklist drops the 4K modes that do not fit in
++	 * that budget.
++	 */
 +	extcon = <&serdes>;
++
++	blacklist_modes = "4096x2160@60",
++			  "4096x2160@59",
++			  "4096x2160@50",
++			  "4096x2160@49",
++			  "4096x2160@30",
++			  "4096x2160@29",
++			  "3840x2160@60",
++			  "3840x2160@59",
++			  "3840x2160@50",
++			  "3840x2160@49";
 +
 +	status = "okay";
 +	ports {
@@ -2185,4 +2236,3 @@ index 0000000000..fa8980e0ff
 +&vinc50 {
 +	status = "disabled";
 +};
-
