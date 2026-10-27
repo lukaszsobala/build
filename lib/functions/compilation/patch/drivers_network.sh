@@ -552,11 +552,11 @@ driver_uwe5622() {
 	if linux-version compare "${version}" ge 5.15 && [[ "$LINUXFAMILY" == sun* || "$LINUXFAMILY" == rockchip64 || "$LINUXFAMILY" == rk35xx ]]; then
 
 		# Attach to specific commit
-		local uwe5622ver='commit:fa9d1a6703a93a85bcf68e865ebc2726474076ad' # Commit date: Oct 13, 2026 (please update when updating commit ref)
+		local uwe5622ver='commit:6b734cccb1213a4e6beed668c84f0c1c5a8072b7' # Commit date: Oct 28, 2026 (please update when updating commit ref)
 
 		display_alert "Adding" "Wireless drivers for Unisoc uwe5622 driver ${uwe5622ver}" "info"
 
-		fetch_from_repo "$GITHUB_SOURCE/armbian/uwe5622" "uwe5622" "${uwe5622ver}" "yes" # https://github.com/armbian/uwe5622
+		fetch_from_repo "$GITHUB_SOURCE/lukaszsobala/uwe5622" "uwe5622" "${uwe5622ver}" "yes" # https://github.com/lukaszsobala/uwe5622 (branch fix-key-overflow-and-logging)
 		cd "$kerneldir" || exit
 
 		rm -rf "$kerneldir/drivers/net/wireless/uwe5622"
