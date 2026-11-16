@@ -1,6 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Mario=20B=C4=83l=C4=83nic=C4=83?=
- <mariobalanica02@gmail.com>
+From: Mario Bălănică <mariobalanica02@gmail.com>
 Date: Wed, 8 Oct 2025 10:49:31 -0400
 Subject: [PATCH] arm64: mm: Force Device mappings for PCIe MMIO
 MIME-Version: 1.0
