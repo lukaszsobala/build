@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lukasz Sobala <lsobala1@gmail.com>
+Date: Tue, 17 Nov 2026 23:15:00 +0100
+Subject: PCI: quirks: Disable ASPM on the RK3528 root port
+
+ASPM setup sets the Common Clock Configuration bit and retrains the link.
+On the RK3528 root port this retrain takes the link down and resets the
+endpoint, so it loses its BAR assignments. Seen with an RX 550 on the
+ROCK 2F FPC port.
+
+Treat L0s and L1 as unsupported on this root port. ASPM setup then skips
+the retrain. "pcie_aspm=off" gives the same result.
+
+Signed-off-by: Lukasz Sobala <lsobala1@gmail.com>
+---
+ drivers/pci/quirks.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/pci/quirks.c b/drivers/pci/quirks.c
+--- a/drivers/pci/quirks.c
++++ b/drivers/pci/quirks.c
+@@ -2551,6 +2551,12 @@
+ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_HUAWEI, 0x1105, quirk_disable_aspm_l0s_l1);
+ 
+ /*
++ * RK3528 root port: the common clock retrain done by ASPM setup takes the
++ * link down and resets the endpoint. Without ASPM support there is no retrain.
++ */
++DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ROCKCHIP, 0x3528, quirk_disable_aspm_l0s_l1);
++
++/*
+  * Some Pericom PCIe-to-PCI bridges in reverse mode need the PCIe Retrain
+  * Link bit cleared after starting the link retrain process to allow this
+  * process to finish.
+-- 
+Armbian
+
